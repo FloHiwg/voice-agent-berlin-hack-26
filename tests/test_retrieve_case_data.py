@@ -106,3 +106,69 @@ def test_retrieve_case_data_tool_via_dispatch(playbook_engine):
         # Verify state was populated with second test case
         assert claim_state.customer.full_name == "Marcus Weber"
         assert claim_state.claim_type == "home_damage"
+
+
+def test_update_case_status_valid(playbook_engine):
+    """Test updating case status with a valid status value."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage_dir = Path(tmpdir)
+
+        claim_state = ClaimState(session_id="test_status")
+        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+
+        result = handlers.update_case_status("assessment_in_progress")
+
+        assert result["status"] == "updated"
+        assert result["new_status"] == "assessment_in_progress"
+        assert result["previous_status"] is None
+        assert claim_state.status == "assessment_in_progress"
+
+
+def test_update_case_status_invalid(playbook_engine):
+    """Test updating case status with an invalid status value."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage_dir = Path(tmpdir)
+
+        claim_state = ClaimState(session_id="test_invalid_status")
+        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+
+        result = handlers.update_case_status("invalid_status_xyz")
+
+        assert result["status"] == "invalid_status"
+        assert "not a valid status" in result["message"]
+        assert "valid_statuses" in result
+        assert claim_state.status is None  # Status should not be updated
+
+
+def test_update_case_status_via_dispatch(playbook_engine):
+    """Test updating case status via dispatch."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage_dir = Path(tmpdir)
+
+        claim_state = ClaimState(session_id="test_dispatch_status")
+        claim_state.status = "pending_details"
+        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+
+        result = handlers.dispatch(
+            "update_case_status",
+            {"new_status": "documentation_required"}
+        )
+
+        assert result["status"] == "updated"
+        assert result["previous_status"] == "pending_details"
+        assert result["new_status"] == "documentation_required"
+        assert claim_state.status == "documentation_required"
+
+
+def test_update_case_status_case_insensitive(playbook_engine):
+    """Test that status updates are case-insensitive."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        storage_dir = Path(tmpdir)
+
+        claim_state = ClaimState(session_id="test_case_insensitive")
+        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+
+        result = handlers.update_case_status("APPROVED")
+
+        assert result["status"] == "updated"
+        assert claim_state.status == "approved"  # Stored in lowercase

@@ -61,10 +61,26 @@ retrieve_case_data_tool = types.FunctionDeclaration(
     ),
 )
 
+update_case_status_tool = types.FunctionDeclaration(
+    name="update_case_status",
+    description="Update the status of the claim based on caller input or case progress. Valid statuses: pending_details, documentation_required, assessment_in_progress, approved, rejected, settled, closed, under_review.",
+    parameters=types.Schema(
+        type=_schema_type("OBJECT"),
+        properties={
+            "new_status": types.Schema(
+                type=_schema_type("STRING"),
+                description="The new status to set for the case. Must be one of the valid status values.",
+            ),
+        },
+        required=["new_status"],
+    ),
+)
+
 tools = [
     types.Tool(
         function_declarations=[
             retrieve_case_data_tool,
+            update_case_status_tool,
             update_claim_state_tool,
             escalate_tool,
             finalize_claim_tool,

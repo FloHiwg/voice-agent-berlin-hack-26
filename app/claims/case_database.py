@@ -3,6 +3,18 @@ from __future__ import annotations
 
 from typing import Any
 
+# Valid status values for a claim
+VALID_STATUSES = {
+    "pending_details",
+    "documentation_required",
+    "assessment_in_progress",
+    "approved",
+    "rejected",
+    "settled",
+    "closed",
+    "under_review",
+}
+
 
 # Mock database of cases indexed by phone number and claim ID
 CASE_DATABASE = {
@@ -87,4 +99,53 @@ def format_case_response(case_data: dict[str, Any] | None) -> dict[str, Any]:
         "incident_location": case_data.get("incident_location"),
         "incident_description": case_data.get("incident_description"),
         "current_status": case_data.get("status"),
+    }
+
+
+def validate_status(status: str) -> bool:
+    """Validate if a status is in the allowed set.
+
+    Args:
+        status: Status value to validate
+
+    Returns:
+        True if valid, False otherwise
+    """
+    return status.lower() in VALID_STATUSES
+
+
+def get_valid_statuses() -> set[str]:
+    """Get the set of valid status values.
+
+    Returns:
+        Set of valid status strings
+    """
+    return VALID_STATUSES.copy()
+
+
+def format_status_update_response(
+    new_status: str, old_status: str | None, is_valid: bool
+) -> dict[str, Any]:
+    """Format status update response for agent.
+
+    Args:
+        new_status: The new status being set
+        old_status: The previous status (if any)
+        is_valid: Whether the status is valid
+
+    Returns:
+        Formatted response
+    """
+    if not is_valid:
+        return {
+            "status": "invalid_status",
+            "message": f"'{new_status}' is not a valid status.",
+            "valid_statuses": sorted(list(VALID_STATUSES)),
+        }
+
+    return {
+        "status": "updated",
+        "previous_status": old_status,
+        "new_status": new_status,
+        "message": f"Case status updated to '{new_status}'",
     }
