@@ -50,6 +50,7 @@ async def run_twilio_bridge(
     model: str,
     playbook_path: Path,
     storage_dir: Path,
+    caller_phone: str | None = None,
 ) -> None:
     transcription_enabled = _env_flag("VOICE_TRANSCRIPTION", False)
     playbook_engine = PlaybookEngine.from_yaml(playbook_path)
@@ -63,7 +64,7 @@ async def run_twilio_bridge(
     print(f"[twilio] session {claim_state.session_id}", flush=True)
     logger.log("session", {"session_id": claim_state.session_id, "mode": "twilio"})
 
-    config = _build_audio_config(playbook_engine, claim_state)
+    config = _build_audio_config(playbook_engine, claim_state, caller_phone=caller_phone)
     stream_state = _StreamState()
     gemini_audio_queue: asyncio.Queue = asyncio.Queue()
     speaking_event = asyncio.Event()

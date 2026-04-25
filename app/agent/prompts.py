@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
@@ -157,6 +158,7 @@ def build_system_prompt(
     claim_state: ClaimState,
     *,
     voice_mode: bool = False,
+    caller_phone: str | None = None,
 ) -> str:
     stage = playbook_engine.current_stage(claim_state)
     missing_fields = playbook_engine.get_missing_fields(claim_state)
@@ -176,8 +178,15 @@ def build_system_prompt(
     else:
         start_rule = "Start by greeting the customer and asking for the first missing field."
 
+    now = datetime.now()
+    date_time_line = f"Current date and time: {now.strftime('%A, %B %d, %Y at %H:%M')}"
+    caller_line = f"Caller phone number (country code prefix indicates origin): {caller_phone}" if caller_phone else ""
+    context_block = "\n".join(filter(None, [date_time_line, caller_line]))
+
     return f"""You are a professional insurance claims intake agent. Be calm, clear, and efficient.
 Ask only one question at a time.
+
+{context_block}
 
 Current stage: {stage}
 Fields still needed: {json.dumps(missing_fields)}

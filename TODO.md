@@ -17,7 +17,7 @@ Nice to have
 
 - [ ] Connect to insurance database
  
-- [ ] 
+- [ ] Add a name to the agent 
 
 Furthermore
 - Remove Twilio phone connection from open points from the plan since it is already done 

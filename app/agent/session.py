@@ -144,6 +144,91 @@ def merge_audio_recordings(
         print(f"\nWarning: Failed to merge audio recordings: {e}", flush=True)
 
 
+class FieldExtractor:
+    """Side-channel extractor: uses a text model to pull claim fields from transcribed speech."""
+
+    _PROMPT = """\
+Extract insurance claim fields from a customer's spoken response.
+
+Already collected (skip these): {filled}
+
+Agent asked: "{agent_question}"
+Customer answered: "{utterance}"
+
+Return a JSON object with dot-notation keys for any NEW fields clearly stated or implied by the answer in context.
+Valid keys: customer.full_name, customer.policy_number, customer.date_of_birth,
+customer.is_policyholder, customer.caller_name, customer.relationship_to_policyholder,
+claim_type, incident.date, incident.time, incident.location, incident.description,
+damage.items, damage.description, damage.estimated_value, damage.photos_available,
+third_parties.involved, third_parties.details, third_parties.witness_info,
+safety.injuries, safety.urgent_risk, safety.police_report, safety.police_report_details,
+services.rental_car_needed, services.rental_car_preference,
+services.repair_shop_selected, services.repair_shop_preference,
+documents.photos, documents.receipts
+
+Rules:
+- Use the agent's question to interpret short answers like "Yes", "No", a number, or a name.
+- Only extract values that are clearly stated or directly implied. Never guess.
+- customer.is_policyholder: true if caller says they ARE the policyholder, false if calling on behalf.
+- claim_type must be one of: auto accident, property damage, theft, injury, weather damage.
+- damage.items must be a list of strings.
+- Skip fields already present in "already collected".
+- Return {{}} if nothing new is extractable.
+- Return only valid JSON. No markdown fences, no explanation."""
+
+    def __init__(self, client: "genai.Client", model: str) -> None:
+        self.client = client
+        self.model = model
+
+    async def extract(self, utterance: str, agent_question: str, claim_state: "ClaimState") -> dict[str, Any]:
+        prompt = self._PROMPT.format(
+            filled=json.dumps(claim_state.filled_fields(), sort_keys=True),
+            agent_question=agent_question,
+            utterance=utterance,
+        )
+        for attempt in range(3):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                )
+                text = (response.text or "").strip()
+                if text.startswith("```"):
+                    lines = text.splitlines()
+                    end = -1 if lines[-1].strip() == "```" else len(lines)
+                    text = "\n".join(lines[1:end])
+                return json.loads(text) if text else {}
+            except Exception as e:
+                if "429" in str(e) and attempt < 2:
+                    wait = 2 ** attempt
+                    print(f"[extractor] rate limited, retrying in {wait}s", flush=True)
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"[extractor] error: {e}", flush=True)
+                    return {}
+        return {}
+
+
+async def _run_extraction(
+    extractor: FieldExtractor,
+    utterance: str,
+    agent_question: str,
+    handlers: "ClaimToolHandlers",
+    logger: "TranscriptLogger",
+) -> None:
+    print(f"\n[extractor] Q: {agent_question!r}", flush=True)
+    print(f"[extractor] A: {utterance!r}", flush=True)
+    extracted = await extractor.extract(utterance, agent_question, handlers.claim_state)
+    if extracted:
+        for key, value in extracted.items():
+            print(f"[extractor] {key} = {value!r}", flush=True)
+        logger.log("tool_call", {"name": "update_claim_state", "args": {"claim_update": extracted}, "via": "extractor"})
+        result = handlers.update_claim_state(extracted)
+        logger.log("tool_response", {"name": "update_claim_state", "result": result, "via": "extractor"})
+    else:
+        print("[extractor] nothing extracted", flush=True)
+
+
 class TranscriptLogger:
     def __init__(self, storage_dir: Path, session_id: str) -> None:
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -250,10 +335,14 @@ async def run_session(
 # Voice mode (Phase 2)
 # ---------------------------------------------------------------------------
 
-def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState) -> types.LiveConnectConfig:
+def _build_audio_config(
+    playbook_engine: PlaybookEngine,
+    claim_state: ClaimState,
+    transcription_enabled: bool = False,
+    caller_phone: str | None = None,
+) -> types.LiveConnectConfig:
     voice_name = os.getenv("GEMINI_VOICE", "Kore")
     silence_ms = int(os.getenv("VAD_SILENCE_MS", "800"))
-    transcription_enabled = _env_flag("VOICE_TRANSCRIPTION", False)
 
     def _start_sensitivity():
         name = os.getenv("VAD_START_SENSITIVITY", "LOW").upper()
@@ -265,7 +354,7 @@ def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState
 
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
-        system_instruction=build_system_prompt(playbook_engine, claim_state, voice_mode=True),
+        system_instruction=build_system_prompt(playbook_engine, claim_state, voice_mode=True, caller_phone=caller_phone),
         tools=tools,
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
@@ -300,7 +389,10 @@ async def _run_voice_session(
     from app.audio.input import send_audio
     from app.audio.output import play_audio, FLUSH
 
-    transcription_enabled = _env_flag("VOICE_TRANSCRIPTION", False)
+    transcription_enabled = True
+    extractor_model = os.getenv("GEMINI_EXTRACTOR_MODEL", "gemini-3-flash-preview")
+    field_extractor = FieldExtractor(client, extractor_model)
+
     playbook_engine = PlaybookEngine.from_yaml(playbook_path)
     claim_state = ClaimState(session_id=new_session_id())
     claim_state.save(storage_dir)
@@ -313,7 +405,7 @@ async def _run_voice_session(
 
     try:
         for attempt in range(_MAX_RECONNECT_ATTEMPTS):
-            config = _build_audio_config(playbook_engine, claim_state)
+            config = _build_audio_config(playbook_engine, claim_state, transcription_enabled=transcription_enabled)
             handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
 
             try:
@@ -335,6 +427,7 @@ async def _run_voice_session(
                             agent_recorder,
                             transcription_enabled=transcription_enabled,
                             speaking_event=speaking_event,
+                            field_extractor=field_extractor,
                         )
                     )
                     play_task = asyncio.create_task(play_audio(audio_queue, speaking_event))
@@ -425,7 +518,9 @@ async def _receive_voice_loop(
     audio_recorder: AudioRecorder | None = None,
     transcription_enabled: bool = False,
     speaking_event: asyncio.Event | None = None,
+    field_extractor: FieldExtractor | None = None,
 ) -> None:
+    agent_turn_buffer: list[str] = []
     while True:
         received_response = False
         async for response in session.receive():
@@ -450,14 +545,21 @@ async def _receive_voice_loop(
                 if transcription_enabled:
                     input_transcription = getattr(server_content, "input_transcription", None)
                     if input_transcription:
-                        text = getattr(input_transcription, "text", None)
-                        if text and text.strip():
-                            logger.log("user", text.strip())
+                        utterance = getattr(input_transcription, "text", None)
+                        if utterance and utterance.strip():
+                            logger.log("user", utterance.strip())
+                            if field_extractor:
+                                agent_question = " ".join(agent_turn_buffer)
+                                agent_turn_buffer.clear()
+                                asyncio.create_task(
+                                    _run_extraction(field_extractor, utterance.strip(), agent_question, handlers, logger)
+                                )
                     output_transcription = getattr(server_content, "output_transcription", None)
                     if output_transcription:
                         text = getattr(output_transcription, "text", None)
                         if text and text.strip():
                             logger.log("model", text.strip())
+                            agent_turn_buffer.append(text.strip())
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
