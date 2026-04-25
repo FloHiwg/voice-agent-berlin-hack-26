@@ -1,6 +1,7 @@
 Necessary
 - [ ] Tool Calling
-- [ ] Record conversations: save full transcript (both sides) to `storage/sessions/<id>_transcript.txt` for every session
+- [x] Record conversations: save full transcript (both sides) to `storage/sessions/<id>_transcript.txt` for every session
+- [x] Audio recording: save full audio to `storage/sessions/<id>_audio.wav` for voice sessions
 - [ ] Latency logging: log time from end-of-speech to first agent audio chunk per turn to `storage/sessions/<id>_latency.
 - [ ] Switch to handle everything as a car accident by default
 - [ ] Connect UI as WEB ui with live transcripts and visib ility of the state and stages etc 

@@ -34,19 +34,112 @@ def new_session_id() -> str:
     return f"claim_{stamp}_{uuid4().hex[:4]}"
 
 
+class AudioRecorder:
+    """Records audio streams to WAV file for voice sessions."""
+
+    def __init__(self, storage_dir: Path, session_id: str, sample_rate: int = 24000) -> None:
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_path = storage_dir / f"{session_id}_audio.wav"
+        self.sample_rate = sample_rate
+        self.audio_chunks: list[bytes] = []
+        self.recording = True
+
+    def add_chunk(self, audio_data: bytes) -> None:
+        """Add audio chunk to recording buffer."""
+        if self.recording:
+            self.audio_chunks.append(audio_data)
+
+    def save(self) -> None:
+        """Save recorded audio to WAV file."""
+        if not self.audio_chunks:
+            return
+
+        try:
+            import wave
+            import numpy as np
+
+            # Combine all chunks
+            audio_bytes = b"".join(self.audio_chunks)
+
+            # Convert to numpy array (assuming 16-bit PCM)
+            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+
+            # Save as WAV
+            with wave.open(str(self.audio_path), "wb") as wav_file:
+                wav_file.setnchannels(1)  # Mono
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(self.sample_rate)
+                wav_file.writeframes(audio_array.tobytes())
+
+            print(f"\nAudio recording saved: {self.audio_path}", flush=True)
+        except Exception as e:
+            print(f"\nWarning: Failed to save audio recording: {e}", flush=True)
+
+    def stop(self) -> None:
+        """Stop recording and save."""
+        self.recording = False
+        self.save()
+
+
 class TranscriptLogger:
     def __init__(self, storage_dir: Path, session_id: str) -> None:
         storage_dir.mkdir(parents=True, exist_ok=True)
-        self.path = storage_dir / f"{session_id}.jsonl"
+        self.jsonl_path = storage_dir / f"{session_id}.jsonl"
+        self.transcript_path = storage_dir / f"{session_id}_transcript.txt"
+        self.session_start_time = datetime.now(UTC)
+
+        # Initialize transcript file with header
+        with self.transcript_path.open("w", encoding="utf-8") as f:
+            f.write(f"=== Call Transcript ===\n")
+            f.write(f"Session ID: {session_id}\n")
+            f.write(f"Started: {self.session_start_time.isoformat()}\n")
+            f.write(f"{'='*50}\n\n")
 
     def log(self, role: str, content: Any) -> None:
+        timestamp = datetime.now(UTC)
+
+        # Log to JSONL (existing format)
         record = {
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": timestamp.isoformat(),
             "role": role,
             "content": content,
         }
-        with self.path.open("a", encoding="utf-8") as handle:
+        with self.jsonl_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+        # Log to human-readable transcript
+        self._log_transcript(role, content, timestamp)
+
+    def _log_transcript(self, role: str, content: Any, timestamp: datetime) -> None:
+        """Write human-readable transcript entry."""
+        with self.transcript_path.open("a", encoding="utf-8") as f:
+            elapsed = (timestamp - self.session_start_time).total_seconds()
+            time_str = f"[{int(elapsed//60):02d}:{int(elapsed%60):02d}]"
+
+            if role == "user":
+                f.write(f"{time_str} USER: {content}\n\n")
+            elif role == "model":
+                f.write(f"{time_str} AGENT: {content}\n\n")
+            elif role == "tool_call":
+                tool_name = content.get("name", "unknown")
+                f.write(f"{time_str} [TOOL CALL: {tool_name}]\n")
+            elif role == "tool_response":
+                f.write(f"{time_str} [TOOL RESPONSE]\n")
+            elif role == "control":
+                f.write(f"{time_str} [SYSTEM: {content}]\n\n")
+            elif role == "session":
+                event = content.get("event", content)
+                f.write(f"{time_str} [SESSION: {event}]\n\n")
+
+    def finalize(self) -> None:
+        """Write session end marker to transcript."""
+        with self.transcript_path.open("a", encoding="utf-8") as f:
+            end_time = datetime.now(UTC)
+            duration = (end_time - self.session_start_time).total_seconds()
+            f.write(f"\n{'='*50}\n")
+            f.write(f"Session ended: {end_time.isoformat()}\n")
+            f.write(f"Total duration: {int(duration//60)}m {int(duration%60)}s\n")
+            f.write(f"{'='*50}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +233,7 @@ async def _run_voice_session(
     claim_state = ClaimState(session_id=new_session_id())
     claim_state.save(storage_dir)
     logger = TranscriptLogger(storage_dir, claim_state.session_id)
+    audio_recorder = AudioRecorder(storage_dir, claim_state.session_id)
 
     print(f"Session ID: {claim_state.session_id}", flush=True)
     logger.log("session", {"session_id": claim_state.session_id, "mode": "voice"})
@@ -164,6 +258,7 @@ async def _run_voice_session(
                         logger,
                         audio_queue,
                         FLUSH,
+                        audio_recorder,
                         speaking_event=speaking_event,
                     )
                 )
@@ -235,6 +330,9 @@ async def _run_voice_session(
             else:
                 raise SessionFinished("reconnect_failed") from exc
 
+    # Finalize recordings
+    logger.finalize()
+    audio_recorder.stop()
     return claim_state
 
 
@@ -244,6 +342,7 @@ async def _receive_voice_loop(
     logger: TranscriptLogger,
     audio_queue: asyncio.Queue,
     flush_sentinel: object,
+    audio_recorder: AudioRecorder,
     speaking_event: asyncio.Event | None = None,
 ) -> None:
     while True:
@@ -262,6 +361,8 @@ async def _receive_voice_loop(
                 for part in getattr(model_turn, "parts", []) or []:
                     inline_data = getattr(part, "inline_data", None)
                     if inline_data and getattr(inline_data, "data", None):
+                        # Record audio chunk
+                        audio_recorder.add_chunk(inline_data.data)
                         if speaking_event:
                             speaking_event.set()
                         await audio_queue.put(inline_data.data)
@@ -320,6 +421,7 @@ async def _run_text_session(
                 logger=logger,
                 eval_transcript=eval_transcript,
             )
+            logger.finalize()
             return claim_state
         except errors.APIError as exc:
             if transport == "live":
@@ -339,6 +441,7 @@ async def _run_text_session(
         eval_transcript=eval_transcript,
     )
 
+    logger.finalize()
     return claim_state
 
 
