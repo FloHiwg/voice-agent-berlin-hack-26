@@ -9,7 +9,7 @@ Build a fast local MVP for an insurance claims intake agent:
 - Gemini 3.1 Flash Live for native real-time audio (handles VAD + STT + LLM + TTS in one WebSocket session)
 - deterministic claim playbook enforced via function calling
 - sub-second perceived latency
-- upgrade path to telli later
+- upgrade path to Twilio phone calls, then telli later if needed
 
 ---
 
@@ -19,6 +19,10 @@ Build a fast local MVP for an insurance claims intake agent:
 mic → WebSocket → Gemini 3.1 Flash Live → speaker
                           ↕
               function calls → playbook engine → claim state
+
+Twilio call → Twilio Media Stream WebSocket → Gemini 3.1 Flash Live
+                                           ↕
+                             function calls → playbook engine → claim state
 ```
 
 VAD, transcription, and voice synthesis are all handled inside the Live session. No separate libraries needed for any of those three stages.
@@ -55,15 +59,22 @@ numpy                   # PCM buffer handling
 pydantic                # claim state schemas
 pyyaml                  # playbook definition
 python-dotenv           # .env loading
+twilio                  # outbound calls, TwiML helpers, status callbacks
+fastapi/uvicorn         # webhook + Media Streams WebSocket endpoint
 ```
 
 ### Credentials
 
 ```env
 GEMINI_API_KEY=...
+TWILIO_ACCOUNT_SID=...
+TWILIO_API_KEY_SID=...
+TWILIO_API_KEY_SECRET=...
+TWILIO_NUMBER=...
 ```
 
 No Google Cloud service account needed for the MVP — the Gemini API key covers the Live API.
+Twilio should use API key auth for REST calls, with the account SID and purchased Twilio number coming from `.env`.
 
 ### Run
 
@@ -87,6 +98,7 @@ python app/main.py --text-mode      # CLI stdin/stdout, no audio hardware
 | Playbook | YAML + function calling tools | model calls tools to update state |
 | State | local JSON | Pydantic schema |
 | Config | `python-dotenv` + `.env` | |
+| Phone transport | Twilio Programmable Voice + Media Streams | bridges PSTN audio to Gemini Live |
 
 ---
 
@@ -150,6 +162,10 @@ No filler audio needed — the session is always warm and the model starts strea
 ```text
 app/
   main.py
+  twilio/
+    webhooks.py       # TwiML voice webhook + call status callbacks
+    media_stream.py   # Twilio Media Streams WebSocket bridge
+    client.py         # outbound call helper using Twilio API key auth
   audio/
     input.py          # sounddevice mic capture → PCM chunks
     output.py         # PCM chunk playback + barge-in handling
@@ -474,6 +490,62 @@ Replace `sounddevice` with telli WebSocket call events and telli audio streaming
 
 ---
 
+## Phase 12: Twilio Phone Integration
+
+Twilio becomes the first real phone transport. Keep the Gemini session, claim state, playbook engine, tools, and prompt builder unchanged; only replace local microphone/speaker I/O with a Twilio Media Streams bridge.
+
+```text
+caller phone
+   ↕ PSTN
+Twilio Programmable Voice
+   ↕ Media Streams WebSocket (8kHz μ-law frames)
+app/twilio/media_stream.py
+   ↕ decode μ-law + resample to 16kHz PCM
+Gemini Live session
+   ↕ 24kHz PCM response audio
+app/twilio/media_stream.py
+   ↕ resample to 8kHz + encode μ-law
+Twilio Programmable Voice
+   ↕
+caller phone
+```
+
+### Twilio endpoints
+
+Add a small web server for Twilio-facing routes:
+
+- `POST /twilio/voice` returns TwiML that connects the call to the media WebSocket
+- `WS /twilio/media` receives `start`, `media`, `mark`, and `stop` events
+- `POST /twilio/status` records call lifecycle events for debugging and session cleanup
+
+### Outbound call helper
+
+Use the Twilio REST API for demo call initiation:
+
+```python
+client.calls.create(
+    to=target_number,
+    from_=os.environ["TWILIO_NUMBER"],
+    url=f"{public_base_url}/twilio/voice",
+    status_callback=f"{public_base_url}/twilio/status",
+)
+```
+
+### Audio bridge responsibilities
+
+- Decode incoming Twilio `media.payload` from base64 μ-law 8kHz to PCM
+- Resample incoming audio to Gemini's expected 16kHz PCM input
+- Send PCM chunks into `send_realtime_input()`
+- Resample Gemini's 24kHz PCM output to 8kHz, encode μ-law, and send Twilio `media` events back
+- On Gemini interruption, clear pending outbound audio and send a Twilio `clear` event
+- Persist the Twilio `callSid` alongside the local `session_id`
+
+### Local development
+
+Expose the local web server with a public HTTPS/WSS tunnel during demos. Configure the Twilio voice webhook to point at `/twilio/voice`, or use the outbound call helper with the tunnel base URL.
+
+---
+
 ## Recommended Build Order
 
 ### Session A — Text loop works end-to-end (hours 1–2)
@@ -497,7 +569,22 @@ Replace `sounddevice` with telli WebSocket call events and telli audio streaming
 7. Add session reconnection on timeout (15-min limit)
 8. Add latency logging per turn
 9. Add eval conversations in YAML + a replay runner in `--text-mode`
-10. Replace local audio I/O with telli
+
+**Checkpoint:** local voice demo is resilient enough to run repeatedly.
+
+### Session D — Twilio phone transport (hours 5–7)
+
+10. Add Twilio env var validation and REST client using API key auth
+11. Add `/twilio/voice`, `/twilio/media`, and `/twilio/status`
+12. Bridge Twilio μ-law 8kHz audio to Gemini 16kHz PCM input
+13. Bridge Gemini 24kHz PCM output back to Twilio μ-law 8kHz audio
+14. Add outbound demo call command and persist `callSid` with session logs
+
+**Checkpoint:** complete claim intake over a real phone call.
+
+### Session E — Optional provider swap
+
+15. Replace local audio I/O or Twilio transport with telli if the demo needs that provider
 
 ---
 
@@ -510,4 +597,6 @@ sounddevice                      — mic capture + speaker playback (PCM)
 Pydantic                         — claim state schema + tool payloads
 PyYAML                           — playbook definition
 python-dotenv                    — .env / API key loading
+twilio                           — Programmable Voice REST client
+FastAPI + Uvicorn                — Twilio webhooks and WebSocket bridge
 ```
