@@ -90,7 +90,7 @@ MUTE_MIC_DURING_PLAYBACK=true
 
 # Ambient office background bed (optional)
 AMBIENT_OFFICE_ENABLED=true
-AMBIENT_OFFICE_GAIN=0.35
+AMBIENT_OFFICE_GAIN=0.10
 # Optional override; defaults to bundled loop in app/audio/assets/
 AMBIENT_OFFICE_FILE=
 ```

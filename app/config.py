@@ -22,11 +22,11 @@ class AmbientOfficeConfig:
 def ambient_office_config() -> AmbientOfficeConfig:
     enabled = _env_flag("AMBIENT_OFFICE_ENABLED", True)
 
-    raw_gain = os.getenv("AMBIENT_OFFICE_GAIN", "0.35").strip()
+    raw_gain = os.getenv("AMBIENT_OFFICE_GAIN", "0.10").strip()
     try:
         gain = float(raw_gain)
     except ValueError:
-        gain = 0.35
+        gain = 0.10
     gain = min(max(gain, 0.0), 1.0)
 
     default_file = Path(__file__).resolve().parent / "audio" / "assets" / "office_ambience_24k_mono.wav"
