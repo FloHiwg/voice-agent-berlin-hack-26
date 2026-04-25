@@ -66,7 +66,7 @@ async def voice_webhook(request: Request) -> Response:
 @app.websocket("/twilio/media")
 async def media_stream(ws: WebSocket) -> None:
     """Handle a Twilio Media Streams WebSocket for one call."""
-    from app.twilio.bridge import run_twilio_bridge
+    from app.phone.bridge import run_twilio_bridge
 
     await ws.accept()
     await run_twilio_bridge(

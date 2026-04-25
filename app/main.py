@@ -115,7 +115,7 @@ def _twilio_setup() -> None:
 
 def _run_twilio_server(port: int) -> None:
     import uvicorn
-    from app.twilio.server import app as twilio_app
+    from app.phone.server import app as twilio_app
 
     print(f"Starting Twilio server on port {port}. Set TWILIO_PUBLIC_URL to your tunnel URL.")
     uvicorn.run(twilio_app, host="0.0.0.0", port=port)

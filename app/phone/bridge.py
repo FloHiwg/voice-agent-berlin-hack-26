@@ -23,7 +23,7 @@ from app.agent.session import (
 from app.agent.tools import ClaimToolHandlers, SessionFinished
 from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
-from app.twilio.audio import (
+from app.phone.audio import (
     resample_24k_to_8k,
     resample_8k_to_16k,
     ulaw_decode,
