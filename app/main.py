@@ -52,6 +52,11 @@ def parse_args() -> argparse.Namespace:
         help="Start the FastAPI server for Twilio phone integration.",
     )
     parser.add_argument(
+        "--twilio-setup",
+        action="store_true",
+        help="Point the Twilio number's voice webhook at TWILIO_PUBLIC_URL/twilio/voice.",
+    )
+    parser.add_argument(
         "--port",
         type=int,
         default=8080,
@@ -76,6 +81,38 @@ async def async_main(args: argparse.Namespace) -> None:
         raise
 
 
+def _twilio_setup() -> None:
+    import os
+    from twilio.rest import Client
+
+    public_url = os.environ.get("TWILIO_PUBLIC_URL", "").rstrip("/")
+    number = os.environ["TWILIO_NUMBER"]
+    if not public_url:
+        print("TWILIO_PUBLIC_URL is not set in .env")
+        return
+
+    webhook_url = f"{public_url}/twilio/voice"
+    status_url = f"{public_url}/twilio/status"
+
+    client = Client(
+        os.environ["TWILIO_API_KEY_SID"],
+        os.environ["TWILIO_API_KEY_SECRET"],
+        account_sid=os.environ["TWILIO_ACCOUNT_SID"],
+    )
+    incoming = client.incoming_phone_numbers.list(phone_number=number)
+    if not incoming:
+        print(f"Number {number} not found in this Twilio account.")
+        return
+
+    incoming[0].update(
+        voice_url=webhook_url,
+        voice_method="POST",
+        status_callback=status_url,
+        status_callback_method="POST",
+    )
+    print(f"Voice webhook set to {webhook_url}")
+
+
 def _run_twilio_server(port: int) -> None:
     import uvicorn
     from app.twilio.server import app as twilio_app
@@ -87,6 +124,9 @@ def _run_twilio_server(port: int) -> None:
 def main() -> None:
     load_dotenv(ROOT / ".env")
     args = parse_args()
+    if args.twilio_setup:
+        _twilio_setup()
+        return
     if args.twilio_server:
         _run_twilio_server(args.port)
         return
