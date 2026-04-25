@@ -35,6 +35,8 @@ from app.phone.audio import (
 )
 
 _FLUSH = object()  # barge-in sentinel, mirrors FLUSH from audio/output.py
+_AMBIENT_FRAME_SECONDS = 0.10
+_AMBIENT_FRAME_SAMPLES_24K = int(24000 * _AMBIENT_FRAME_SECONDS)
 
 
 @dataclass
@@ -161,7 +163,20 @@ async def _twilio_send_loop(
 ) -> None:
     """Read Gemini audio from queue; resample, encode μ-law, send to Twilio."""
     while True:
-        chunk = await audio_queue.get()
+        try:
+            chunk = await asyncio.wait_for(audio_queue.get(), timeout=_AMBIENT_FRAME_SECONDS)
+        except asyncio.TimeoutError:
+            if not state.stream_sid or ambient_mixer is None:
+                continue
+            ambient_only_24k = ambient_mixer.mix(np.zeros(_AMBIENT_FRAME_SAMPLES_24K, dtype=np.int16))
+            ambient_only_8k = resample_24k_to_8k(ambient_only_24k)
+            ambient_payload = base64.b64encode(ulaw_encode(ambient_only_8k)).decode()
+            await ws.send_text(
+                json.dumps(
+                    {"event": "media", "streamSid": state.stream_sid, "media": {"payload": ambient_payload}}
+                )
+            )
+            continue
 
         if chunk is _FLUSH:
             while not audio_queue.empty():
