@@ -119,6 +119,18 @@ class ClaimState(BaseModel):
         )
         return path
 
+    _METADATA_FIELDS = {"session_id", "created_at", "completed_at", "handoff_required", "risk_flags"}
+
+    def summary(self) -> str:
+        filled = {
+            k: v for k, v in self.filled_fields().items()
+            if k.split(".")[0] not in self._METADATA_FIELDS
+        }
+        if not filled:
+            return "No fields collected yet"
+        parts = [f"{k}={v!r}" for k, v in sorted(filled.items())]
+        return "Collected so far: " + ", ".join(parts)
+
     def filled_fields(self) -> dict[str, Any]:
         flat = flatten_dict(self.model_dump(mode="json"))
         return {key: value for key, value in flat.items() if is_filled(value)}

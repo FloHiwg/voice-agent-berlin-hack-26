@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--text-mode",
         action="store_true",
-        help="Run terminal stdin/stdout intake mode.",
+        help="Use stdin/stdout instead of mic/speaker (Phase 1 fallback).",
     )
     parser.add_argument(
         "--eval-transcript",

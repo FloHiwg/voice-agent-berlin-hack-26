@@ -19,6 +19,8 @@ from app.agent.tools import ClaimToolHandlers, SessionFinished
 from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
 
+_MAX_RECONNECT_ATTEMPTS = 3
+
 
 def new_session_id() -> str:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -40,6 +42,10 @@ class TranscriptLogger:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
 async def run_session(
     *,
     text_mode: bool,
@@ -48,18 +54,6 @@ async def run_session(
     eval_transcript: Path | None = None,
     transport: str = "auto",
 ) -> ClaimState:
-    if not text_mode:
-        raise NotImplementedError("Phase 1 supports --text-mode only.")
-
-    playbook_engine = PlaybookEngine.from_yaml(playbook_path)
-    claim_state = ClaimState(session_id=new_session_id())
-    claim_state.save(storage_dir)
-    logger = TranscriptLogger(storage_dir, claim_state.session_id)
-    handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
-
-    print(f"Session ID: {claim_state.session_id}", flush=True)
-    logger.log("session", {"session_id": claim_state.session_id})
-
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is missing. Add it to .env or your shell.")
@@ -70,6 +64,199 @@ async def run_session(
         http_options=types.HttpOptions(api_version=api_version),
     )
     model = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-live-preview")
+
+    if text_mode:
+        return await _run_text_session(
+            client=client,
+            model=model,
+            playbook_path=playbook_path,
+            storage_dir=storage_dir,
+            eval_transcript=eval_transcript,
+            transport=transport,
+        )
+
+    return await _run_voice_session(
+        client=client,
+        model=model,
+        playbook_path=playbook_path,
+        storage_dir=storage_dir,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Voice mode (Phase 2)
+# ---------------------------------------------------------------------------
+
+def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState) -> types.LiveConnectConfig:
+    voice_name = os.getenv("GEMINI_VOICE", "Kore")
+    silence_ms = int(os.getenv("VAD_SILENCE_MS", "800"))
+
+    # Map env-var string ("LOW", "HIGH") to SDK enum; fall back to LOW.
+    def _start_sensitivity():
+        name = os.getenv("VAD_START_SENSITIVITY", "LOW").upper()
+        return getattr(types.StartSensitivity, f"START_SENSITIVITY_{name}", types.StartSensitivity.START_SENSITIVITY_LOW)
+
+    def _end_sensitivity():
+        name = os.getenv("VAD_END_SENSITIVITY", "LOW").upper()
+        return getattr(types.EndSensitivity, f"END_SENSITIVITY_{name}", types.EndSensitivity.END_SENSITIVITY_LOW)
+
+    return types.LiveConnectConfig(
+        response_modalities=["AUDIO"],
+        system_instruction=build_system_prompt(playbook_engine, claim_state),
+        tools=tools,
+        speech_config=types.SpeechConfig(
+            voice_config=types.VoiceConfig(
+                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+            )
+        ),
+        realtime_input_config=types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                start_of_speech_sensitivity=_start_sensitivity(),
+                end_of_speech_sensitivity=_end_sensitivity(),
+                silence_duration_ms=silence_ms,
+            )
+        ),
+    )
+
+
+async def _run_voice_session(
+    *,
+    client: genai.Client,
+    model: str,
+    playbook_path: Path,
+    storage_dir: Path,
+) -> ClaimState:
+    from app.audio.input import send_audio
+    from app.audio.output import play_audio, FLUSH
+
+    playbook_engine = PlaybookEngine.from_yaml(playbook_path)
+    claim_state = ClaimState(session_id=new_session_id())
+    claim_state.save(storage_dir)
+    logger = TranscriptLogger(storage_dir, claim_state.session_id)
+
+    print(f"Session ID: {claim_state.session_id}", flush=True)
+    logger.log("session", {"session_id": claim_state.session_id, "mode": "voice"})
+
+    for attempt in range(_MAX_RECONNECT_ATTEMPTS):
+        config = _build_audio_config(playbook_engine, claim_state)
+        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+
+        try:
+            async with client.aio.live.connect(model=model, config=config) as session:
+                if attempt == 0:
+                    greeting = "Begin the claims intake now. Greet the customer and ask for the first required field."
+                else:
+                    greeting = (
+                        f"Reconnecting after session timeout. {claim_state.summary()}. "
+                        "Continue the intake from where we left off."
+                    )
+                await session.send_client_content(
+                    turns=types.Content(role="user", parts=[types.Part(text=greeting)]),
+                    turn_complete=True,
+                )
+                logger.log("control", greeting)
+
+                audio_queue: asyncio.Queue = asyncio.Queue()
+
+                receive_task = asyncio.create_task(
+                    _receive_voice_loop(session, handlers, logger, audio_queue, FLUSH)
+                )
+                play_task = asyncio.create_task(play_audio(audio_queue))
+                send_task = asyncio.create_task(send_audio(session))
+
+                done, pending = await asyncio.wait(
+                    {receive_task, play_task, send_task},
+                    return_when=asyncio.FIRST_EXCEPTION,
+                )
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                for task in done:
+                    exc = task.exception()
+                    if isinstance(exc, SessionFinished):
+                        raise exc
+                    elif exc is not None:
+                        raise exc
+                return claim_state
+
+        except SessionFinished:
+            raise
+        except Exception as exc:
+            claim_state.save(storage_dir)
+            logger.log("session", {"event": "disconnect", "attempt": attempt + 1, "reason": str(exc)})
+            if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
+                print(
+                    f"\nConnection lost ({exc}). "
+                    f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
+                    flush=True,
+                )
+                await asyncio.sleep(2)
+            else:
+                raise SessionFinished("reconnect_failed") from exc
+
+    return claim_state
+
+
+async def _receive_voice_loop(
+    session: Any,
+    handlers: ClaimToolHandlers,
+    logger: TranscriptLogger,
+    audio_queue: asyncio.Queue,
+    flush_sentinel: object,
+) -> None:
+    async for response in session.receive():
+        server_content = getattr(response, "server_content", None)
+        if server_content:
+            if getattr(server_content, "interrupted", False):
+                await audio_queue.put(flush_sentinel)
+                continue
+            model_turn = getattr(server_content, "model_turn", None)
+            for part in getattr(model_turn, "parts", []) or []:
+                inline_data = getattr(part, "inline_data", None)
+                if inline_data and getattr(inline_data, "data", None):
+                    await audio_queue.put(inline_data.data)
+
+        tool_call = getattr(response, "tool_call", None)
+        if tool_call:
+            for call in getattr(tool_call, "function_calls", []) or []:
+                name = getattr(call, "name", "")
+                args = dict(getattr(call, "args", {}) or {})
+                call_id = getattr(call, "id", None)
+                logger.log("tool_call", {"name": name, "args": args})
+                result = handlers.dispatch(name, args)
+                logger.log("tool_response", {"name": name, "result": result})
+                await _send_tool_response(session, name, result, call_id)
+                if handlers.finished_reason:
+                    raise SessionFinished(handlers.finished_reason)
+
+    raise SessionFinished("session_ended")
+
+
+# ---------------------------------------------------------------------------
+# Text mode (Phase 1) — unchanged
+# ---------------------------------------------------------------------------
+
+async def _run_text_session(
+    *,
+    client: genai.Client,
+    model: str,
+    playbook_path: Path,
+    storage_dir: Path,
+    eval_transcript: Path | None,
+    transport: str,
+) -> ClaimState:
+    playbook_engine = PlaybookEngine.from_yaml(playbook_path)
+    claim_state = ClaimState(session_id=new_session_id())
+    claim_state.save(storage_dir)
+    logger = TranscriptLogger(storage_dir, claim_state.session_id)
+    handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+
+    print(f"Session ID: {claim_state.session_id}", flush=True)
+    logger.log("session", {"session_id": claim_state.session_id})
+
     config = types.LiveConnectConfig(
         response_modalities=["TEXT"],
         system_instruction=build_system_prompt(playbook_engine, claim_state),
@@ -305,7 +492,7 @@ async def receive_loop(
             logger.log("tool_call", {"name": call["name"], "args": call["args"]})
             result = handlers.dispatch(call["name"], call["args"])
             logger.log("tool_response", {"name": call["name"], "result": result})
-            await send_tool_response(live_session, call["name"], result, call.get("id"))
+            await _send_tool_response(live_session, call["name"], result, call.get("id"))
             if handlers.finished_reason:
                 raise SessionFinished(handlers.finished_reason)
 
@@ -341,7 +528,7 @@ def extract_function_calls(response: Any) -> list[dict[str, Any]]:
     return calls
 
 
-async def send_tool_response(
+async def _send_tool_response(
     live_session: Any,
     name: str,
     result: dict[str, Any],
