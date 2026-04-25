@@ -5,6 +5,9 @@ import asyncio
 import numpy as np
 import sounddevice as sd
 
+from app.audio.ambient import AmbientLoopMixer
+from app.config import ambient_office_config
+
 _SAMPLE_RATE = 24000
 _PLAYBACK_TAIL_SECONDS = 0.25
 _AMBIENT_FRAME_SECONDS = 0.10
@@ -14,11 +17,27 @@ _AMBIENT_FRAME_SAMPLES = int(_SAMPLE_RATE * _AMBIENT_FRAME_SECONDS)
 FLUSH = object()
 
 
+def _build_ambient_mixer() -> AmbientLoopMixer | None:
+    config = ambient_office_config()
+    if not config.enabled or config.gain <= 0.0:
+        return None
+    try:
+        return AmbientLoopMixer.from_wav(
+            sample_rate=_SAMPLE_RATE,
+            gain=config.gain,
+            wav_path=config.file_path,
+        )
+    except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        print(f"[audio] ambient disabled: {exc}", flush=True)
+        return None
+
+
 async def play_audio(
     queue: asyncio.Queue,
     speaking_event: asyncio.Event | None = None,
 ) -> None:
     """Read PCM chunks from *queue* and play them. FLUSH drains pending audio."""
+    ambient_mixer = _build_ambient_mixer()
     stream = sd.RawOutputStream(samplerate=_SAMPLE_RATE, channels=1, dtype="int16")
     stream.start()
     try:

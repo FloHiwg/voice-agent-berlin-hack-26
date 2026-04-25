@@ -24,6 +24,8 @@ from app.agent.session import (
     new_session_id,
     send_live_text,
 )
+from app.audio.ambient import AmbientLoopMixer
+from app.config import ambient_office_config
 from app.agent.tools import ClaimToolHandlers, SessionFinished
 from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
@@ -37,6 +39,21 @@ from app.phone.audio import (
 _FLUSH = object()  # barge-in sentinel, mirrors FLUSH from audio/output.py
 _AMBIENT_FRAME_SECONDS = 0.10
 _AMBIENT_FRAME_SAMPLES_24K = int(24000 * _AMBIENT_FRAME_SECONDS)
+
+
+def _build_ambient_mixer() -> AmbientLoopMixer | None:
+    config = ambient_office_config()
+    if not config.enabled or config.gain <= 0.0:
+        return None
+    try:
+        return AmbientLoopMixer.from_wav(
+            sample_rate=24000,
+            gain=config.gain,
+            wav_path=config.file_path,
+        )
+    except Exception as exc:  # pragma: no cover - defensive runtime fallback
+        print(f"[twilio] ambient disabled: {exc}", flush=True)
+        return None
 
 
 @dataclass
@@ -162,6 +179,7 @@ async def _twilio_send_loop(
     state: _StreamState,
 ) -> None:
     """Read Gemini audio from queue; resample, encode μ-law, send to Twilio."""
+    ambient_mixer = _build_ambient_mixer()
     while True:
         try:
             chunk = await asyncio.wait_for(audio_queue.get(), timeout=_AMBIENT_FRAME_SECONDS)
