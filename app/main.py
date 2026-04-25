@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
@@ -26,7 +27,12 @@ def parse_args() -> argparse.Namespace:
         "--eval-transcript",
         type=Path,
         default=None,
-        help="Optional plaintext file with one user turn per line.",
+        help="Replay a conversation file (.txt one turn per line, or .yaml with transcript + expect).",
+    )
+    parser.add_argument(
+        "--eval-assert",
+        action="store_true",
+        help="After an eval run, assert claim state against expected fields in the YAML file.",
     )
     parser.add_argument(
         "--playbook",
@@ -66,19 +72,67 @@ def parse_args() -> argparse.Namespace:
 
 
 async def async_main(args: argparse.Namespace) -> None:
+    # Resolve eval transcript: YAML files carry their own transcript lines
+    eval_path = args.eval_transcript
+    expected_fields: dict[str, Any] = {}
+
+    if eval_path and eval_path.suffix in {".yaml", ".yml"}:
+        import yaml
+        data = yaml.safe_load(eval_path.read_text(encoding="utf-8"))
+        lines = data.get("transcript", [])
+        expected_fields = data.get("expect", {})
+        # Write transcript lines to a temp text file for the existing runner
+        import tempfile, os
+        tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8")
+        tmp.write("\n".join(str(l) for l in lines))
+        tmp.close()
+        eval_path = Path(tmp.name)
+
     try:
-        await run_session(
+        claim_state = await run_session(
             text_mode=args.text_mode,
             playbook_path=args.playbook,
             storage_dir=args.storage_dir,
-            eval_transcript=args.eval_transcript,
+            eval_transcript=eval_path,
             transport=args.transport,
         )
     except SessionFinished as exc:
         print(f"\nSession ended: {exc.reason}")
+        return
     except Exception as exc:
         print_exception(exc)
         raise
+
+    if (args.eval_assert or expected_fields) and expected_fields:
+        _assert_claim(claim_state, expected_fields)
+
+
+def _assert_claim(claim_state: Any, expected: dict[str, Any]) -> None:
+    print("\n── Eval assertions ──")
+    passed = failed = 0
+    for field, expected_value in expected.items():
+        try:
+            actual = claim_state.get_path(field)
+        except ValueError:
+            actual = None
+        ok = _values_match(actual, expected_value)
+        status = "PASS" if ok else "FAIL"
+        print(f"  {status}  {field}: expected={expected_value!r}  actual={actual!r}")
+        if ok:
+            passed += 1
+        else:
+            failed += 1
+    print(f"\n{passed} passed, {failed} failed")
+    if failed:
+        sys.exit(1)
+
+
+def _values_match(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, bool):
+        return actual == expected
+    if isinstance(expected, str) and isinstance(actual, str):
+        return expected.lower() in actual.lower()
+    return actual == expected
 
 
 def _twilio_setup() -> None:

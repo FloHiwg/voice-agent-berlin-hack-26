@@ -1,40 +1,112 @@
 states:
   identify_customer:
     required:
-      - customer.full_name
-      - customer.policy_number
-      - customer.date_of_birth
+      - customer.identity_verified: >
+          Set to true once identity is confirmed via (a) policy number alone,
+          or (b) full name and date of birth together. Do not fill from partial information.
+      - customer.is_policyholder: >
+          Boolean. Ask whether the caller is the policyholder or calling on someone else's behalf.
+    next: verify_caller
+
+  verify_caller:
+    skip_if: customer.is_policyholder == true
+    required:
+      - customer.caller_name: >
+          Full name of the person actually calling, when they are not the policyholder.
+      - customer.relationship_to_policyholder: >
+          Relationship of the caller to the policyholder, e.g. spouse, child, employer, lawyer.
     next: classify_claim
 
   classify_claim:
     required:
-      - claim_type
-      - incident.date
-      - incident.location
+      - claim_type: >
+          Short claim category: auto accident, property damage, theft, injury, or weather damage.
+      - incident.date: >
+          Date the incident happened. Ask a follow-up if the caller gives only a vague answer.
+      - incident.location: >
+          Specific location including street, city, highway, or landmark.
     next: collect_incident
 
   collect_incident:
     required:
-      - incident.time
-      - incident.description
-      - damage.items
-      - third_parties.involved
-      - safety.injuries
-      - safety.urgent_risk
+      - incident.time: >
+          Time or approximate time of the incident.
+      - incident.description: >
+          Brief factual description of what happened, in the caller's own words.
+      - damage.items: >
+          One or more damaged or affected items as a list.
+      - third_parties.involved: >
+          Boolean. Whether another person, driver, vehicle, or property was involved.
+      - safety.injuries: >
+          Boolean or short description. Escalate immediately when injuries are reported.
+      - safety.urgent_risk: >
+          Boolean. Immediate danger, fire, medical emergency, or unsafe location.
+      - safety.police_report: >
+          Boolean. Whether police attended or a report was filed.
+    next: third_party_details
+
+  third_party_details:
+    skip_if: third_parties.involved == false
+    required:
+      - third_parties.details: >
+          Name, plate number, insurance, or contact details of the other party.
+    next: witness
+
+  witness:
+    skip_if: third_parties.involved == false
+    required:
+      - third_parties.witness_info: >
+          Name and contact information of any witnesses. Set to 'none' if caller confirms no witnesses.
+    next: police_details
+
+  police_details:
+    skip_if: safety.police_report == false
+    required:
+      - safety.police_report_details: >
+          Case number, attending officer, or police station if known.
     next: collect_damage
 
   collect_damage:
     required:
-      - damage.description
-      - damage.estimated_value
-      - damage.photos_available
+      - damage.description: >
+          Specific description of visible damage or loss.
+      - damage.estimated_value: >
+          Estimated repair or replacement cost. Accept 'unknown' only after caller confirms they do not know.
+      - damage.photos_available: >
+          Boolean. Whether the caller has photos of the damage or scene.
+    next: settlement
+
+  settlement:
+    required:
+      - services.rental_car_needed: >
+          Boolean. Whether the caller needs a replacement vehicle while theirs is being repaired.
+      - services.repair_shop_selected: >
+          Boolean. Whether the caller wants to use the insurer's preferred repair shop.
+    next: rental_preference
+
+  rental_preference:
+    skip_if: services.rental_car_needed == false
+    required:
+      - services.rental_car_preference: >
+          Preferred rental car size or type, e.g. small hatchback, estate, automatic.
+    next: repair_preference
+
+  repair_preference:
+    skip_if: services.repair_shop_selected == false
+    required:
+      - services.repair_shop_preference: >
+          Preferred repair shop name or area if the caller has one; otherwise confirm insurer choice.
     next: collect_documents
 
   collect_documents:
     required:
-      - documents.photos
-      - documents.receipts
-      - documents.police_report
+      - documents.photos: >
+          Boolean. Whether the caller can submit photos of the damage.
+      - documents.receipts: >
+          Boolean. Whether receipts or proof of purchase are available.
+      - documents.police_report: >
+          Boolean. Whether the caller has a copy of the police report.
+          Set to false automatically and do not ask if safety.police_report is false.
     next: finalize
 
   finalize:

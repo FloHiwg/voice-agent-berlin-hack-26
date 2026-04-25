@@ -1,0 +1,35 @@
+# Third-party caller: spouse calls on behalf of policyholder, identifies by name + DOB
+transcript:
+  - "Hi, my name is Maria Stevens and the date of birth on the policy is March 15 1978"
+  - "No, I'm calling on behalf of my husband, Mark Stevens"
+  - "Maria Stevens, I'm his wife"
+  - "It was a car accident"
+  - "Yesterday, April 24th 2026"
+  - "On the Ring Road near Utrecht, northbound"
+  - "Around 8 in the morning during rush hour"
+  - "Mark was hit from the side at an intersection by a car that ran a red light"
+  - "The front door and the side panel on the driver's side are damaged"
+  - "Yes, the other car was involved. The driver's name is Peter Johnson."
+  - "No injuries, thankfully"
+  - "No urgent risk"
+  - "Yes, the police attended and filed a report. The case number is UP-2026-04821."
+  - "No witnesses we know of"
+  - "The front door is badly dented and won't open from outside. Side panel is scratched and dented."
+  - "The garage quoted around 4000 euros"
+  - "Yes, we have photos"
+  - "Yes, Mark needs a rental car. An estate or similar would be best."
+  - "Yes, use your preferred repair shop please"
+  - "Yes, photos are available"
+  - "No, no receipts"
+  - "Yes, we have a copy of the police report"
+
+expect:
+  customer.identity_verified: true
+  customer.is_policyholder: false
+  customer.caller_name: Maria Stevens
+  customer.relationship_to_policyholder: wife
+  claim_type: auto accident
+  safety.police_report: true
+  safety.police_report_details: UP-2026-04821
+  services.rental_car_needed: true
+  documents.police_report: true

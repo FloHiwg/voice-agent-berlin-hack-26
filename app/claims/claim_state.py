@@ -17,6 +17,10 @@ class Customer(BaseModel):
     policy_number: str | None = None
     date_of_birth: str | None = None
     preferred_contact_method: str | None = None
+    identity_verified: bool | None = None
+    is_policyholder: bool | None = None
+    caller_name: str | None = None
+    relationship_to_policyholder: str | None = None
 
 
 class Incident(BaseModel):

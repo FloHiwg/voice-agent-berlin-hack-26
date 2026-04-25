@@ -95,24 +95,60 @@ VOICE_SESSION_EXAMPLE_SCRIPT = """\
 
 
 FIELD_EXPECTATIONS = {
-    "customer.full_name": "Policyholder's complete first and last name. If the caller gives only a first name, ask for the last name before updating this field.",
-    "customer.policy_number": "Full policy number, claim number, or license plate if the caller does not know the policy number.",
-    "customer.date_of_birth": "Policyholder date of birth with day, month, and year when possible.",
-    "claim_type": "Short claim category such as auto accident, property damage, theft, injury, or weather damage.",
+    # Identification
+    "customer.identity_verified": (
+        "Set to true once identity is confirmed via ONE of two paths: "
+        "(a) policy number alone, or (b) full name AND date of birth together. "
+        "Never set from partial information. If the caller provides a first name only, "
+        "ask for their last name. If they give a name but no DOB, ask for DOB before setting this field."
+    ),
+    "customer.is_policyholder": (
+        "Boolean. Ask: 'Are you the policyholder, or are you calling on their behalf?' "
+        "Set true only when the caller explicitly confirms they are the policyholder."
+    ),
+    "customer.caller_name": (
+        "Full name of the person actually calling, when they are not the policyholder. "
+        "Ask for first and last name."
+    ),
+    "customer.relationship_to_policyholder": (
+        "Relationship to the policyholder: spouse, child, parent, employer, lawyer, or other. "
+        "Only collected when customer.is_policyholder is false."
+    ),
+    # Identity sub-fields (collected on the way to identity_verified)
+    "customer.full_name": "Policyholder's complete first and last name. Required for identity path B (name + DOB).",
+    "customer.policy_number": "Full policy number or license plate. Required for identity path A (policy number alone).",
+    "customer.date_of_birth": "Policyholder date of birth with day, month, and year. Required for identity path B (name + DOB).",
+    # Claim classification
+    "claim_type": "Short claim category: auto accident, property damage, theft, injury, or weather damage.",
     "incident.date": "Date the incident happened. Ask a follow-up if the caller gives only a vague date.",
-    "incident.location": "Specific incident location, including street, city, highway, or landmark when available.",
+    "incident.location": "Specific location including street, city, highway, or landmark.",
     "incident.time": "Time or approximate time of the incident.",
-    "incident.description": "Brief factual description of what happened.",
+    "incident.description": "Brief factual description of what happened, in the caller's own words.",
+    # Damage and third parties
     "damage.items": "One or more damaged or affected items as a list.",
-    "third_parties.involved": "Boolean yes/no for whether another person, driver, vehicle, business, or property owner was involved.",
-    "safety.injuries": "Boolean yes/no or short injury detail. Escalate immediately when injuries are reported.",
-    "safety.urgent_risk": "Boolean yes/no for immediate danger, unsafe location, fire, medical risk, or other urgent safety concern.",
     "damage.description": "Specific description of visible damage or loss.",
-    "damage.estimated_value": "Estimated repair cost, replacement value, or 'unknown' only after the caller says they do not know.",
-    "damage.photos_available": "Boolean yes/no for whether photos are available.",
-    "documents.photos": "Boolean yes/no for whether the caller can provide photos.",
-    "documents.receipts": "Boolean yes/no for whether receipts or proof of purchase are available.",
-    "documents.police_report": "Boolean yes/no for whether a police report exists.",
+    "damage.estimated_value": "Estimated repair or replacement cost. Accept 'unknown' only after the caller confirms they do not know.",
+    "damage.photos_available": "Boolean. Whether the caller has photos of the damage or scene.",
+    "third_parties.involved": "Boolean. Whether another person, driver, vehicle, or property was involved.",
+    "third_parties.details": "Name, plate number, insurance, or contact details of the other party. Only ask if third_parties.involved is true.",
+    "third_parties.witness_info": "Name and contact of any witnesses. Set to 'none' if the caller confirms no witnesses. Only ask if third_parties.involved is true.",
+    # Safety
+    "safety.injuries": "Boolean or short description. Escalate immediately when any injury is reported.",
+    "safety.urgent_risk": "Boolean. Immediate danger, fire, medical emergency, or unsafe location.",
+    "safety.police_report": "Boolean. Whether police attended the scene or a report was filed.",
+    "safety.police_report_details": "Case number, attending officer name, or police station. Only ask if safety.police_report is true.",
+    # Services
+    "services.rental_car_needed": "Boolean. Whether the caller needs a replacement vehicle while theirs is repaired.",
+    "services.rental_car_preference": "Preferred rental car size or type. Only ask if services.rental_car_needed is true.",
+    "services.repair_shop_selected": "Boolean. Whether the caller wants to use the insurer's preferred repair shop.",
+    "services.repair_shop_preference": "Preferred repair shop name or area. Only ask if services.repair_shop_selected is false.",
+    # Documents
+    "documents.photos": "Boolean. Whether the caller can submit photos of the damage.",
+    "documents.receipts": "Boolean. Whether receipts or proof of purchase are available.",
+    "documents.police_report": (
+        "Boolean. Whether the caller has a copy of the police report. "
+        "Set to false automatically and skip the question if safety.police_report is false."
+    ),
 }
 
 
@@ -159,6 +195,13 @@ Rules:
 - Call finalize_claim once current_stage is done or once all missing_fields are collected.
 - Confirm corrections naturally. Do not repeat every collected field back to the user.
 - Do not invent unknown field values. Ask a follow-up when an answer is ambiguous.
+
+Identity rules:
+- Accept either (a) policy number alone, or (b) full name AND date of birth together to verify identity. Do not require both paths.
+- Once one path is satisfied, set customer.identity_verified = true and move on. Do not ask for the other path's fields.
+- After identity is confirmed, ask: "Are you the policyholder, or are you calling on their behalf?" before collecting any claim details.
+- If the caller is not the policyholder, collect their name and relationship before proceeding.
+- If safety.police_report is false, set documents.police_report = false without asking.
 
 Example script:
 {VOICE_SESSION_EXAMPLE_SCRIPT}

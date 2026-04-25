@@ -14,6 +14,7 @@ class PlaybookState:
     name: str
     required: dict[str, str | None]
     next: str | None
+    skip_if: str | None = None
 
 
 class PlaybookEngine:
@@ -40,6 +41,7 @@ class PlaybookEngine:
                 name=name,
                 required=reqs,
                 next=config.get("next"),
+                skip_if=config.get("skip_if"),
             )
         return cls(states)
 
@@ -52,12 +54,30 @@ class PlaybookEngine:
         while stage_name not in seen:
             seen.add(stage_name)
             state = self.states[stage_name]
+            if state.skip_if and self._eval_skip_if(claim_state, state.skip_if):
+                if not state.next or state.next == "done":
+                    return "done"
+                stage_name = state.next
+                continue
             if self._missing_for_state(claim_state, state):
                 return stage_name
             if not state.next or state.next == "done":
                 return "done"
             stage_name = state.next
         raise ValueError("Playbook contains a cycle")
+
+    @staticmethod
+    def _eval_skip_if(claim_state: ClaimState, condition: str) -> bool:
+        """Evaluate a simple 'field.path == value' skip condition."""
+        parts = condition.split(" == ", 1)
+        if len(parts) != 2:
+            return False
+        field_path, raw = parts[0].strip(), parts[1].strip()
+        expected: Any = {"true": True, "false": False, "null": None}.get(raw, raw)
+        try:
+            return claim_state.get_path(field_path) == expected
+        except ValueError:
+            return False
 
     def get_missing_fields(self, claim_state: ClaimState) -> dict[str, str | None]:
         stage = self.current_stage(claim_state)

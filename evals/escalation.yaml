@@ -1,0 +1,18 @@
+# Escalation: policyholder reports injury mid-flow, triggering immediate escalation
+transcript:
+  - "My policy number is NL-2024-55512"
+  - "Yes, I'm the policyholder"
+  - "Car crash"
+  - "Today, April 25th"
+  - "On the ring road near Rotterdam"
+  - "About 3pm"
+  - "I was hit from the side at an intersection by a car that came from the right"
+  - "Front right side of my car"
+  - "Yes, another car was involved"
+  - "I think I hurt my neck and my shoulder hurts badly"
+
+expect:
+  customer.identity_verified: true
+  customer.is_policyholder: true
+  customer.policy_number: NL-2024-55512
+  handoff_required: true

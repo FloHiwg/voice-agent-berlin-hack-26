@@ -1,0 +1,35 @@
+# Happy path: policyholder identifies by policy number, rear-end collision, no injuries, no police
+transcript:
+  - "Hi, my policy number is NL-2024-88291"
+  - "Yes, I am the policyholder"
+  - "It was a car accident, I was rear-ended"
+  - "It happened today, April 25th 2026"
+  - "On the A10 motorway near Amsterdam, southbound"
+  - "Around 2:15 in the afternoon"
+  - "I was stopped at a red light when the car behind drove into me. The other driver admitted it was his fault."
+  - "The rear bumper and the boot lid are damaged"
+  - "Yes, another vehicle was involved. The driver is John Smith, plate AB-123-CD."
+  - "No injuries on my side"
+  - "No, it's not urgent, I'm safely parked"
+  - "No, the police were not called"
+  - "No witnesses that I know of"
+  - "The rear bumper is cracked and pushed in, the boot won't close properly"
+  - "I'd estimate around 2500 euros for repairs"
+  - "Yes, I took photos at the scene"
+  - "Yes, I would like a rental car please, a small hatchback would be fine"
+  - "Yes, please use your preferred repair shop"
+  - "Yes, I have the photos ready to send"
+  - "No, no receipts relevant here"
+  - "No police report since they weren't called"
+
+expect:
+  customer.identity_verified: true
+  customer.is_policyholder: true
+  customer.policy_number: NL-2024-88291
+  claim_type: auto accident
+  third_parties.involved: true
+  safety.injuries: false
+  safety.police_report: false
+  services.rental_car_needed: true
+  services.repair_shop_selected: true
+  documents.police_report: false
