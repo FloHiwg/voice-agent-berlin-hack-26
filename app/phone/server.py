@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import wave
 from contextlib import asynccontextmanager
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -20,6 +22,9 @@ from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
 
 ROOT = Path(__file__).resolve().parents[2]
+_AUDIO_ASSETS_DIR = ROOT / "app" / "audio" / "assets"
+_PRE_CONNECT_PAUSE_SECONDS = 3
+_JINGLE_SOUND_CLIP_SECONDS = 5
 
 
 @asynccontextmanager
@@ -233,12 +238,55 @@ async def voice_webhook(request: Request) -> Response:
     if caller_number:
         stream_url += f"?from={quote(str(caller_number))}"
 
+    jingle_voice_exists = (_AUDIO_ASSETS_DIR / "jingle_voice.wav").exists()
+    jingle_sound_exists = (_AUDIO_ASSETS_DIR / "jingle_sound.wav").exists()
+
     response = VoiceResponse()
+    response.pause(length=_PRE_CONNECT_PAUSE_SECONDS)
+    if jingle_voice_exists:
+        response.play(f"{public_url}/twilio/audio/jingle_voice.wav")
+    else:
+        response.say("Please hold while we connect you to an agent.")
+    if jingle_sound_exists:
+        response.play(f"{public_url}/twilio/audio/jingle_sound.wav?seconds={_JINGLE_SOUND_CLIP_SECONDS}")
+    response.pause(length=_PRE_CONNECT_PAUSE_SECONDS)
     connect = Connect()
     stream = Stream(url=stream_url)
     connect.append(stream)
     response.append(connect)
     return Response(content=str(response), media_type="application/xml")
+
+
+@app.get("/twilio/audio/{asset_name}")
+async def twilio_audio_asset(asset_name: str, seconds: int | None = None) -> Response:
+    """Serve call-intro audio assets with optional clipping."""
+    if asset_name not in {"jingle_voice.wav", "jingle_sound.wav"}:
+        raise HTTPException(status_code=404, detail=f"Unknown audio asset {asset_name!r}")
+
+    file_path = _AUDIO_ASSETS_DIR / asset_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Missing audio asset {asset_name!r}")
+
+    if not seconds or seconds <= 0:
+        return FileResponse(file_path, media_type="audio/wav", filename=asset_name)
+
+    try:
+        with wave.open(str(file_path), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            framerate = wav_file.getframerate()
+            frame_count = min(wav_file.getnframes(), framerate * seconds)
+            clipped_frames = wav_file.readframes(frame_count)
+    except wave.Error as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid wav file {asset_name!r}: {exc}") from exc
+
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as clipped_wav:
+        clipped_wav.setnchannels(channels)
+        clipped_wav.setsampwidth(sample_width)
+        clipped_wav.setframerate(framerate)
+        clipped_wav.writeframes(clipped_frames)
+    return Response(content=buffer.getvalue(), media_type="audio/wav")
 
 
 @app.websocket("/twilio/media")

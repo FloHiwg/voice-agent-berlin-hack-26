@@ -39,6 +39,7 @@ from app.phone.audio import (
 _FLUSH = object()  # barge-in sentinel, mirrors FLUSH from audio/output.py
 _AMBIENT_FRAME_SECONDS = 0.10
 _AMBIENT_FRAME_SAMPLES_24K = int(24000 * _AMBIENT_FRAME_SECONDS)
+_PRE_GREETING_DELAY_SECONDS = 8
 
 
 def _build_ambient_mixer() -> AmbientLoopMixer | None:
@@ -90,6 +91,8 @@ async def run_twilio_bridge(
 
     try:
         async with client.aio.live.connect(model=model, config=config) as session:
+            # Safety delay so the agent does not greet immediately if Twilio intro audio is skipped.
+            await asyncio.sleep(_PRE_GREETING_DELAY_SECONDS)
             await send_live_text(
                 session,
                 "Begin the claims intake now. Greet the customer and ask for the first required field.",

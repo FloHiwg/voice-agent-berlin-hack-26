@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import sys
+import wave
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,11 @@ from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
 
 _MAX_RECONNECT_ATTEMPTS = 3
+_CLIENT_INTRO_PAUSE_SECONDS = 3
+_CLIENT_JINGLE_SOUND_SECONDS = 5
+_CLIENT_PLAYBACK_SAMPLE_RATE = 24000
+_ROOT = Path(__file__).resolve().parents[2]
+_AUDIO_ASSETS_DIR = _ROOT / "app" / "audio" / "assets"
 
 
 def _env_flag(name: str, default: bool) -> bool:
@@ -27,6 +33,66 @@ def _env_flag(name: str, default: bool) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _load_wav_for_playback(path: Path, *, clip_seconds: int | None = None) -> "np.ndarray":
+    import numpy as np
+
+    with wave.open(str(path), "rb") as wav_file:
+        channels = wav_file.getnchannels()
+        sample_width = wav_file.getsampwidth()
+        source_rate = wav_file.getframerate()
+        frames_to_read = wav_file.getnframes()
+        if clip_seconds:
+            frames_to_read = min(frames_to_read, source_rate * clip_seconds)
+        frame_bytes = wav_file.readframes(frames_to_read)
+
+    if sample_width != 2:
+        raise ValueError(f"Unsupported sample width {sample_width * 8}-bit for {path.name}")
+
+    audio = np.frombuffer(frame_bytes, dtype=np.int16)
+    if channels > 1:
+        audio = audio.reshape(-1, channels).mean(axis=1).astype(np.int16)
+
+    if source_rate != _CLIENT_PLAYBACK_SAMPLE_RATE and len(audio) > 0:
+        target_len = int(len(audio) * _CLIENT_PLAYBACK_SAMPLE_RATE / source_rate)
+        indices = np.linspace(0, len(audio) - 1, target_len)
+        audio = np.interp(indices, np.arange(len(audio)), audio).astype(np.int16)
+
+    return np.ascontiguousarray(audio)
+
+
+async def _play_intro_sequence() -> None:
+    import sounddevice as sd
+
+    jingle_voice = _AUDIO_ASSETS_DIR / "jingle_voice.wav"
+    jingle_sound = _AUDIO_ASSETS_DIR / "jingle_sound.wav"
+    if not jingle_voice.exists() or not jingle_sound.exists():
+        print("[audio] intro assets missing; skipping intro sequence", flush=True)
+        return
+
+    try:
+        print("[audio] intro sequence start (3s pause)", flush=True)
+        await asyncio.sleep(_CLIENT_INTRO_PAUSE_SECONDS)
+
+        stream = sd.RawOutputStream(samplerate=_CLIENT_PLAYBACK_SAMPLE_RATE, channels=1, dtype="int16")
+        stream.start()
+        try:
+            voice_audio = _load_wav_for_playback(jingle_voice)
+            if len(voice_audio) > 0:
+                await asyncio.to_thread(stream.write, voice_audio)
+
+            sound_audio = _load_wav_for_playback(jingle_sound, clip_seconds=_CLIENT_JINGLE_SOUND_SECONDS)
+            if len(sound_audio) > 0:
+                await asyncio.to_thread(stream.write, sound_audio)
+        finally:
+            stream.stop()
+            stream.close()
+
+        print("[audio] intro sequence end (3s pause)", flush=True)
+        await asyncio.sleep(_CLIENT_INTRO_PAUSE_SECONDS)
+    except Exception as exc:
+        print(f"[audio] intro playback skipped: {exc}", flush=True)
 
 
 def new_session_id() -> str:
@@ -409,6 +475,8 @@ async def _run_voice_session(
             handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
 
             try:
+                if attempt == 0:
+                    await _play_intro_sequence()
                 async with client.aio.live.connect(model=model, config=config) as session:
                     audio_queue: asyncio.Queue = asyncio.Queue()
                     speaking_event = (
@@ -440,6 +508,7 @@ async def _run_voice_session(
                             f"Reconnecting after session timeout. {claim_state.summary()}. "
                             "Continue the intake from where we left off."
                         )
+                    print("[audio] intro complete; requesting Gemini greeting", flush=True)
                     await send_live_text(session, greeting)
                     logger.log("control", greeting)
 
