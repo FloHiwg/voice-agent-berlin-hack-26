@@ -1,104 +1,190 @@
-# Voice Project
+# Insurance Claims Intake Voice Agent
 
-Phase 1 is a terminal-based insurance claims intake agent. It uses Gemini Live in text mode, follows a declarative YAML playbook, updates structured claim state through function calls, and persists each session to local JSON files.
+A real-time insurance claims intake agent powered by Gemini 3.1 Flash Live. The agent conducts a full structured motor claim intake via voice — over a local mic/speaker or a real phone call via Twilio — following a declarative YAML playbook enforced through function calling.
+
+Three run modes:
+- **Text** — terminal only, no audio hardware required
+- **Voice** — local microphone and speaker via Gemini Live audio
+- **Phone** — inbound calls via Twilio Media Streams
+
+---
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.13+
 - `uv`
 - Gemini API key
 
-## Setup
+> **Note:** Always use `uv run python` rather than bare `python`. The conda base environment shadows the project venv otherwise.
 
-Install dependencies with `uv`:
+---
+
+## Setup
 
 ```bash
 uv sync --extra dev
-```
-
-Create your local environment file:
-
-```bash
 cp .env.example .env
 ```
 
-Then set:
+Fill in `.env` — see the relevant section below for which variables each mode needs.
+
+---
+
+## Mode 1: Text
+
+Terminal-only. No microphone or speaker needed. Uses Gemini Live in text mode with the same playbook and function-calling logic as voice mode.
+
+### Environment
 
 ```env
-GEMINI_API_KEY=your_api_key_here
+GEMINI_API_KEY=your_key_here
 GEMINI_MODEL=gemini-3.1-flash-live-preview
 GEMINI_TEXT_MODEL=gemini-2.5-flash
 GEMINI_API_VERSION=v1alpha
 ```
 
-Voice mode defaults to suppressing microphone chunks while Gemini audio is
-playing, which avoids laptop speaker audio triggering a false barge-in. To allow
-barge-in while using headphones or echo cancellation, set:
-
-```env
-MUTE_MIC_DURING_PLAYBACK=false
-```
-
-## Run
-
-Start the Phase 1 text-mode intake agent:
+### Run
 
 ```bash
 uv run python app/main.py --text-mode
 ```
 
-The agent prints a session ID, greets the customer, asks one question at a time, and saves progress after each structured state update.
-
-By default, `--transport auto` tries the Gemini Live model first, then falls back to `GEMINI_TEXT_MODEL` with the regular Gemini text API if Live rejects the session during setup. This keeps the Phase 1 terminal workflow testable even when the preview Live API returns setup-time `1008` or `1011` errors.
-
-Force one transport when debugging:
+By default (`--transport auto`) the agent tries Gemini Live first, then falls back to the standard `GEMINI_TEXT_MODEL` if Live rejects the session. Force a specific transport when debugging:
 
 ```bash
 uv run python app/main.py --text-mode --transport live
 uv run python app/main.py --text-mode --transport generate-content
 ```
 
-## Eval Transcript Mode
+### Replay a transcript
 
-You can replay a prepared conversation file with one user turn per line:
+Feed a prepared conversation file (one user turn per line) to test the playbook without typing:
 
 ```bash
 uv run python app/main.py --text-mode --eval-transcript path/to/transcript.txt
 ```
 
-## Storage
+---
 
-Runtime files are written to:
+## Mode 2: Voice (local mic/speaker)
 
-```text
-storage/sessions/<session_id>.jsonl
-storage/sessions/<session_id>_claim.json
+Full duplex voice via local microphone and speaker. VAD, barge-in, STT, and TTS are all handled inside the Gemini Live session — no additional libraries needed.
+
+### Environment
+
+Same as Text mode, plus optional VAD tuning:
+
+```env
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-3.1-flash-live-preview
+GEMINI_API_VERSION=v1alpha
+GEMINI_VOICE=Kore
+
+# VAD tuning (optional)
+VAD_SILENCE_MS=800
+VAD_START_SENSITIVITY=LOW
+VAD_END_SENSITIVITY=LOW
+
+# Set to false when using headphones or echo cancellation
+MUTE_MIC_DURING_PLAYBACK=true
 ```
 
-The JSONL file stores the transcript and tool events. The claim JSON file stores the latest structured claim state and is overwritten after each `update_claim_state` call.
-
-## Tests
-
-Run the local playbook/state tests:
+### Run
 
 ```bash
-uv run pytest
+uv run python app/main.py
 ```
+
+The agent greets the caller immediately and conducts the full intake. The session ID is printed on start. Ctrl-C saves current state and exits cleanly.
+
+---
+
+## Mode 3: Phone (Twilio)
+
+Inbound phone calls via Twilio Programmable Voice and Media Streams. The Gemini session is unchanged — only the audio I/O layer swaps from sounddevice to a Twilio WebSocket bridge.
+
+### Environment
+
+```env
+GEMINI_API_KEY=your_key_here
+GEMINI_MODEL=gemini-3.1-flash-live-preview
+GEMINI_API_VERSION=v1alpha
+
+TWILIO_ACCOUNT_SID=your_account_sid
+TWILIO_API_KEY_SID=your_api_key_sid
+TWILIO_API_KEY_SECRET=your_api_key_secret
+TWILIO_NUMBER=+1234567890
+TWILIO_PUBLIC_URL=https://your-tunnel.ngrok-free.app
+```
+
+### First-time setup
+
+1. **Start a public tunnel** (re-run whenever the ngrok URL changes):
+
+   ```bash
+   ngrok http 8080
+   ```
+
+   Copy the HTTPS URL into `TWILIO_PUBLIC_URL` in `.env`.
+
+2. **Register the webhook** with your Twilio number:
+
+   ```bash
+   uv run python app/main.py --twilio-setup
+   ```
+
+   This reads `TWILIO_NUMBER` and `TWILIO_PUBLIC_URL` from `.env` and sets the voice webhook via the Twilio REST API. Re-run whenever the tunnel URL changes.
+
+### Run
+
+```bash
+uv run python app/main.py --twilio-server --port 8080
+```
+
+The server listens on `POST /twilio/voice` (TwiML), `WS /twilio/media` (audio bridge), and `POST /twilio/status` (lifecycle logging). Call your Twilio number — the agent answers immediately.
+
+---
+
+## Storage
+
+Each session writes two files:
+
+```text
+storage/sessions/<session_id>.jsonl        # transcript + tool events
+storage/sessions/<session_id>_claim.json   # structured claim state (updated after each tool call)
+```
+
+---
 
 ## Project Layout
 
 ```text
 app/
-  main.py
+  main.py                 # CLI entry point
   agent/
-    prompts.py
-    schemas.py
-    session.py
-    tools.py
+    prompts.py            # system prompt builder + FIELD_EXPECTATIONS
+    schemas.py            # tool payload schemas
+    session.py            # Gemini Live session lifecycle + reconnection
+    tools.py              # update_claim_state, escalate, finalize_claim handlers
+  audio/
+    input.py              # sounddevice mic capture
+    output.py             # sounddevice speaker playback + barge-in flush
   claims/
-    claim_state.py
-    playbook.yaml
-    playbook_engine.py
+    claim_state.py        # Pydantic claim state schema
+    playbook.yaml         # stage machine: required fields per stage
+    playbook_engine.py    # stage resolution + missing field logic
+  phone/
+    server.py             # FastAPI: /twilio/voice, /twilio/media, /twilio/status
+    bridge.py             # Twilio Media Streams ↔ Gemini Live bridge
+    audio.py              # G.711 μ-law codec + PCM resampling (numpy)
 tests/
-  test_playbook_engine.py
+  test_prompts.py
+```
+
+---
+
+## Tests
+
+```bash
+uv run pytest
 ```
