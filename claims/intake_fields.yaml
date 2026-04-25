@@ -1,0 +1,709 @@
+# Claims Intake Field Reference
+# Full set of information to collect from the reporter.
+# Sections are ordered by intake priority (earlier = collected first).
+# Fields marked required: true must be collected before the claim can progress.
+# Fields marked conditional: true are only collected when the trigger condition is met.
+
+sections:
+
+  # ── 1. POLICY & REPORTER IDENTIFICATION ────────────────────────────────────
+  # Must be completed before any other section. Gates the entire workflow.
+
+  - id: identification
+    label: Policy & Reporter Identification
+    fields:
+      - key: policy.number
+        label: Policy number
+        type: string
+        required: true
+
+      - key: policy.license_plate
+        label: License plate
+        type: string
+        required: false
+        notes: Alternative identifier if policy number unknown
+
+      - key: policy.vin
+        label: Vehicle identification number (VIN)
+        type: string
+        required: false
+        notes: Alternative identifier if policy number unknown
+
+      - key: policyholder.full_name
+        label: Policyholder full name
+        type: string
+        required: true
+
+      - key: policyholder.phone
+        label: Policyholder phone number
+        type: string
+        required: true
+
+      - key: policyholder.email
+        label: Policyholder email address
+        type: string
+        required: false
+
+      - key: policyholder.preferred_channel
+        label: Preferred communication channel
+        type: enum
+        values: [phone, email, mail, portal]
+        required: true
+
+      - key: reporter.type
+        label: Who is reporting?
+        type: enum
+        values: [policyholder, driver, claimant, repair_shop, lawyer, broker]
+        required: true
+        notes: Reporter type determines downstream workflow routing
+
+      - key: reporter.full_name
+        label: Reporter full name
+        type: string
+        required: false
+        notes: Required when reporter type is not policyholder
+
+      - key: reporter.contact
+        label: Reporter contact details
+        type: string
+        required: false
+        notes: Required when reporter type is not policyholder
+
+  # ── 2. ACCIDENT CIRCUMSTANCES ──────────────────────────────────────────────
+
+  - id: accident
+    label: Accident Circumstances
+    fields:
+      - key: incident.date
+        label: Date of loss
+        type: date
+        required: true
+
+      - key: incident.time
+        label: Time of loss
+        type: time
+        required: true
+
+      - key: incident.report_time
+        label: Time of this report
+        type: datetime
+        required: true
+        notes: Delay between loss and report is relevant for duty-of-disclosure and fraud signals
+
+      - key: incident.location.address
+        label: Full address of incident
+        type: string
+        required: true
+
+      - key: incident.location.country
+        label: Country
+        type: string
+        required: true
+
+      - key: incident.location.road_type
+        label: Road type
+        type: enum
+        values: [highway, rural_road, urban, parking_lot, other]
+        required: true
+
+      - key: incident.weather
+        label: Weather conditions
+        type: string
+        required: true
+
+      - key: incident.visibility
+        label: Visibility conditions
+        type: string
+        required: false
+
+      - key: incident.road_conditions
+        label: Road surface conditions
+        type: string
+        required: false
+
+      - key: incident.loss_type
+        label: Type of loss
+        type: enum
+        values:
+          - moving_traffic_collision
+          - stationary_vehicle_hit
+          - parking_damage
+          - wildlife_animal
+          - property_damage_no_third_party
+          - personal_injury
+        required: true
+
+      - key: incident.description
+        label: Free-form description of how the accident happened
+        type: text
+        required: true
+        notes: Reporter's own words — do not paraphrase
+
+      - key: incident.direction_of_travel
+        label: Direction of travel (own vehicle)
+        type: string
+        required: false
+
+      - key: incident.other_party_direction
+        label: Direction of travel (other party)
+        type: string
+        required: false
+        conditional: true
+        condition: third_party.involved == true
+
+      - key: incident.estimated_speed
+        label: Estimated speed at impact
+        type: string
+        required: false
+
+      - key: incident.right_of_way
+        label: Right-of-way rules at scene (traffic light, sign, right-before-left)
+        type: string
+        required: false
+
+      - key: incident.photos_available
+        label: Photos or sketch of the scene available?
+        type: boolean
+        required: true
+
+      - key: incident.european_accident_statement
+        label: European Accident Statement filled out and signed by both parties?
+        type: boolean
+        required: false
+        conditional: true
+        condition: incident.location.country in EU
+
+  # ── 3. DRIVER ──────────────────────────────────────────────────────────────
+  # Coverage-critical. Must be completed before coverage confirmation.
+
+  - id: driver
+    label: Driver Information
+    fields:
+      - key: driver.is_policyholder
+        label: Was the policyholder the driver?
+        type: boolean
+        required: true
+
+      - key: driver.full_name
+        label: Driver full name
+        type: string
+        required: false
+        conditional: true
+        condition: driver.is_policyholder == false
+
+      - key: driver.date_of_birth
+        label: Driver date of birth
+        type: date
+        required: false
+        conditional: true
+        condition: driver.is_policyholder == false
+
+      - key: driver.relationship_to_policyholder
+        label: Relationship to policyholder
+        type: string
+        required: false
+        conditional: true
+        condition: driver.is_policyholder == false
+
+      - key: driver.license_valid
+        label: Valid driver's license?
+        type: boolean
+        required: true
+
+      - key: driver.license_class
+        label: License class
+        type: string
+        required: false
+
+      - key: driver.in_policy_scope
+        label: Driver included in policy's driver scope?
+        type: boolean
+        required: true
+        notes: Coverage exclusion trigger if false
+
+      - key: driver.alcohol_drugs
+        label: Alcohol, drugs, or medication involved?
+        type: boolean
+        required: true
+        notes: Coverage exclusion and criminal offense trigger
+
+      - key: driver.breathalyzer
+        label: Breathalyzer test conducted?
+        type: boolean
+        required: false
+        conditional: true
+        condition: driver.alcohol_drugs == true
+
+      - key: driver.health_limitations
+        label: Health limitations relevant to the incident?
+        type: text
+        required: false
+
+      - key: driver.hit_and_run
+        label: Hit-and-run?
+        type: boolean
+        required: true
+        notes: Immediately triggers duty-of-disclosure breach review and potential criminal offense flag
+
+  # ── 4. THIRD PARTY / CLAIMANT ──────────────────────────────────────────────
+
+  - id: third_party
+    label: Third Party / Claimant
+    conditional: true
+    condition: incident.loss_type != property_damage_no_third_party
+    fields:
+      - key: third_party.involved
+        label: Was a third party involved?
+        type: boolean
+        required: true
+
+      - key: third_party.full_name
+        label: Third party full name
+        type: string
+        required: false
+        conditional: true
+        condition: third_party.involved == true
+
+      - key: third_party.address
+        label: Third party address
+        type: string
+        required: false
+
+      - key: third_party.phone
+        label: Third party phone
+        type: string
+        required: false
+
+      - key: third_party.email
+        label: Third party email
+        type: string
+        required: false
+
+      - key: third_party.license_plate
+        label: Third party license plate
+        type: string
+        required: false
+
+      - key: third_party.vehicle
+        label: Third party vehicle make and model
+        type: string
+        required: false
+
+      - key: third_party.insurer
+        label: Third party insurer
+        type: string
+        required: false
+        notes: Enables direct recourse if known
+
+      - key: third_party.policy_number
+        label: Third party policy number
+        type: string
+        required: false
+
+      - key: third_party.owner_is_driver
+        label: Registered owner is same as driver?
+        type: boolean
+        required: false
+        notes: Capture both records if different
+
+      - key: third_party.owner_name
+        label: Registered owner name (if different from driver)
+        type: string
+        required: false
+        conditional: true
+        condition: third_party.owner_is_driver == false
+
+      - key: third_party.admitted_fault
+        label: Did the other party admit or deny fault?
+        type: enum
+        values: [admitted, denied, no_statement]
+        required: false
+
+      - key: third_party.already_claimed
+        label: Has the other party already raised a claim (letter, lawyer, own insurer)?
+        type: boolean
+        required: false
+
+  # ── 5. POLICE & AUTHORITIES ────────────────────────────────────────────────
+
+  - id: police
+    label: Police & Authorities
+    fields:
+      - key: police.on_scene
+        label: Was police on scene?
+        type: boolean
+        required: true
+
+      - key: police.station
+        label: Police station name
+        type: string
+        required: false
+        conditional: true
+        condition: police.on_scene == true
+
+      - key: police.case_number
+        label: Police case / reference number
+        type: string
+        required: false
+        conditional: true
+        condition: police.on_scene == true
+
+      - key: police.fines_indicated
+        label: Fines or criminal proceedings indicated?
+        type: boolean
+        required: false
+        conditional: true
+        condition: police.on_scene == true
+
+      - key: police.offense_type
+        label: Type of offense if applicable
+        type: enum
+        values: [none, administrative, criminal]
+        required: false
+        conditional: true
+        condition: police.fines_indicated == true
+        notes: Criminal offense (hit-and-run, DUI, dangerous driving) triggers escalation
+
+  # ── 6. WITNESSES ───────────────────────────────────────────────────────────
+
+  - id: witnesses
+    label: Witnesses
+    fields:
+      - key: witnesses.independent_present
+        label: Independent witnesses present?
+        type: boolean
+        required: true
+
+      - key: witnesses.list
+        label: Witness details (name, contact, brief statement)
+        type: list
+        item_fields: [full_name, phone, statement]
+        required: false
+        conditional: true
+        condition: witnesses.independent_present == true
+
+      - key: witnesses.own_passengers
+        label: Passengers in own vehicle?
+        type: boolean
+        required: true
+
+      - key: witnesses.own_passenger_details
+        label: Own passenger details (name, contact)
+        type: list
+        item_fields: [full_name, phone]
+        required: false
+        conditional: true
+        condition: witnesses.own_passengers == true
+
+      - key: witnesses.other_party_passengers
+        label: Passengers in other party's vehicle?
+        type: boolean
+        required: false
+        conditional: true
+        condition: third_party.involved == true
+
+  # ── 7. PERSONAL INJURIES ───────────────────────────────────────────────────
+
+  - id: injuries
+    label: Personal Injuries
+    fields:
+      - key: injuries.any_injured
+        label: Were any persons injured?
+        type: boolean
+        required: true
+        notes: Triggers escalation review if true
+
+      - key: injuries.injured_parties
+        label: Who was injured?
+        type: multiselect
+        values: [own_driver, own_passengers, other_party_driver, other_party_passengers, pedestrian, cyclist, third_party]
+        required: false
+        conditional: true
+        condition: injuries.any_injured == true
+
+      - key: injuries.description
+        label: Description of injuries
+        type: text
+        required: false
+        conditional: true
+        condition: injuries.any_injured == true
+
+      - key: injuries.treatment_type
+        label: Treatment type
+        type: enum
+        values: [none, outpatient, inpatient]
+        required: false
+        conditional: true
+        condition: injuries.any_injured == true
+
+      - key: injuries.hospital
+        label: Hospital or treating doctor
+        type: string
+        required: false
+        conditional: true
+        condition: injuries.treatment_type in [outpatient, inpatient]
+
+      - key: injuries.health_insurer
+        label: Health insurer of injured party
+        type: string
+        required: false
+        conditional: true
+        condition: injuries.any_injured == true
+        notes: Required for subrogation under social insurance recovery rules
+
+      - key: injuries.time_off_work
+        label: Anticipated time off work?
+        type: string
+        required: false
+        conditional: true
+        condition: injuries.any_injured == true
+
+  # ── 8. PROPERTY DAMAGE ─────────────────────────────────────────────────────
+
+  - id: damage
+    label: Property Damage
+    fields:
+      - key: damage.own_vehicle.description
+        label: Description of damage to own vehicle
+        type: text
+        required: true
+
+      - key: damage.own_vehicle.photos_available
+        label: Photos of damage available?
+        type: boolean
+        required: true
+
+      - key: damage.own_vehicle.drivable
+        label: Is the vehicle drivable?
+        type: boolean
+        required: true
+
+      - key: damage.own_vehicle.current_location
+        label: Current location of the vehicle
+        type: string
+        required: false
+        conditional: true
+        condition: damage.own_vehicle.drivable == false
+
+      - key: damage.own_vehicle.towed_by
+        label: Towed by whom and to where?
+        type: string
+        required: false
+        conditional: true
+        condition: damage.own_vehicle.drivable == false
+
+      - key: damage.own_vehicle.pre_existing
+        label: Pre-existing damage in the affected area?
+        type: boolean
+        required: true
+        notes: Relevant for fraud detection and repair quota
+
+      - key: damage.other_vehicle.description
+        label: Description of damage to other party's vehicle
+        type: text
+        required: false
+        conditional: true
+        condition: third_party.involved == true
+
+      - key: damage.third_party_property.involved
+        label: Third-party property damaged? (guardrail, building, traffic light, fence)
+        type: boolean
+        required: true
+
+      - key: damage.third_party_property.description
+        label: Description of third-party property damage
+        type: text
+        required: false
+        conditional: true
+        condition: damage.third_party_property.involved == true
+
+      - key: damage.third_party_property.owner
+        label: Owner of damaged property (incl. municipality if applicable)
+        type: string
+        required: false
+        conditional: true
+        condition: damage.third_party_property.involved == true
+
+  # ── 9. LIABILITY INDICATORS ────────────────────────────────────────────────
+
+  - id: liability
+    label: Liability Indicators
+    fields:
+      - key: liability.fault_admitted_written
+        label: Did anyone admit fault in writing at the scene?
+        type: boolean
+        required: false
+        notes: Limited evidentiary value but relevant for initial assessment
+
+      - key: liability.right_of_way_violation
+        label: Right-of-way violation?
+        type: boolean
+        required: false
+
+      - key: liability.traffic_signal_violation
+        label: Red light or traffic signal violation?
+        type: boolean
+        required: false
+
+      - key: liability.following_distance
+        label: Insufficient following distance?
+        type: boolean
+        required: false
+
+      - key: liability.lane_change
+        label: Lane change involved?
+        type: boolean
+        required: false
+
+      - key: liability.reversing
+        label: Reversing maneuver involved?
+        type: boolean
+        required: false
+        notes: Prima facie liability indicator (reversing party presumed at fault)
+
+      - key: liability.rear_end
+        label: Rear-end collision?
+        type: boolean
+        required: false
+        notes: Prima facie liability indicator (following vehicle presumed at fault)
+
+  # ── 10. COVERAGE & DISCLOSURE CHECKS ──────────────────────────────────────
+
+  - id: coverage
+    label: Coverage & Disclosure Checks
+    fields:
+      - key: coverage.use_in_scope
+        label: Was the vehicle used within contractual scope (private, not commercial)?
+        type: boolean
+        required: true
+        notes: Coverage exclusion trigger if false
+
+      - key: coverage.paid_transport
+        label: Was the vehicle used for paid passenger transport?
+        type: boolean
+        required: true
+        notes: Coverage exclusion trigger if true
+
+      - key: coverage.racing_event
+        label: Was the vehicle involved in a racing or skill-based event?
+        type: boolean
+        required: true
+        notes: Coverage exclusion trigger if true
+
+      - key: coverage.unregistered_modifications
+        label: Any unregistered modifications to the vehicle?
+        type: boolean
+        required: true
+        notes: Coverage exclusion trigger if true
+
+      - key: coverage.inspection_current
+        label: Vehicle inspection and emissions test current?
+        type: boolean
+        required: true
+        notes: Coverage condition check
+
+      - key: coverage.geographic_scope
+        label: Was the incident within the geographic coverage area?
+        type: boolean
+        required: true
+
+      - key: coverage.late_reporting_reason
+        label: Reason for late reporting (if applicable)
+        type: text
+        required: false
+        conditional: true
+        condition: incident.report_time - incident.date > 7 days
+
+  # ── 11. RECOURSE INDICATORS ────────────────────────────────────────────────
+
+  - id: recourse
+    label: Recourse Indicators
+    fields:
+      - key: recourse.other_insurer_known
+        label: Other party's insurer known?
+        type: boolean
+        required: false
+
+      - key: recourse.third_party_cause
+        label: Third-party causation? (repair shop, prior owner, manufacturer)
+        type: boolean
+        required: false
+
+      - key: recourse.road_authority_cause
+        label: Road or infrastructure authority potentially liable?
+        type: boolean
+        required: false
+        notes: E.g. pothole, missing signage, unmarked hazard
+
+      - key: recourse.social_insurance_involved
+        label: Social insurance carrier involved due to personal injury?
+        type: boolean
+        required: false
+        conditional: true
+        condition: injuries.any_injured == true
+
+  # ── 12. FRAUD SIGNALS ──────────────────────────────────────────────────────
+  # Collected passively from other answers; ask explicitly only when signals already present.
+
+  - id: fraud
+    label: Fraud Signals
+    fields:
+      - key: fraud.damage_noticed_vs_reported_gap
+        label: When exactly was the damage first noticed?
+        type: datetime
+        required: false
+        notes: Large gap between notice and report is a fraud signal
+
+      - key: fraud.parties_known_to_each_other
+        label: Are the parties known to each other or related?
+        type: boolean
+        required: false
+
+      - key: fraud.prior_claims_24m
+        label: Similar claims in the last 24 months?
+        type: boolean
+        required: false
+
+      - key: fraud.vehicle_for_sale
+        label: Is the vehicle currently listed for sale?
+        type: boolean
+        required: false
+
+      - key: fraud.damage_value_vs_vehicle_value
+        label: Is damage value strikingly high relative to vehicle residual value?
+        type: boolean
+        required: false
+
+  # ── 13. SETTLEMENT PREFERENCES ─────────────────────────────────────────────
+
+  - id: settlement
+    label: Settlement Preferences
+    fields:
+      - key: settlement.repair_shop_preference
+        label: Preferred repair shop (if any)
+        type: string
+        required: false
+
+      - key: settlement.rental_car_requested
+        label: Rental car or loss-of-use compensation requested?
+        type: boolean
+        required: true
+
+      - key: settlement.lawyer_involved
+        label: Lawyer involved?
+        type: boolean
+        required: true
+        notes: Changes communication channel entirely — all contact goes through legal counsel
+
+      - key: settlement.lawyer_name
+        label: Lawyer name and firm
+        type: string
+        required: false
+        conditional: true
+        condition: settlement.lawyer_involved == true
+
+      - key: settlement.preferred_channel
+        label: Preferred communication channel for settlement
+        type: enum
+        values: [phone, email, mail, portal]
+        required: true
