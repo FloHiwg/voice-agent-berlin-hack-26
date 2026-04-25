@@ -143,6 +143,22 @@ uv run python app/main.py --twilio-server --port 8080
 
 The server listens on `POST /twilio/voice` (TwiML), `WS /twilio/media` (audio bridge), and `POST /twilio/status` (lifecycle logging). Call your Twilio number — the agent answers immediately.
 
+### Web UI data API
+
+The same FastAPI server also exposes session data for a web UI:
+
+- `GET /api/sessions` — list sessions with available artifacts, claim state, and stage visibility
+- `GET /api/sessions/{session_id}` — full details for one session
+- `GET /api/sessions/{session_id}/events` — parsed JSONL event log
+- `GET /api/sessions/{session_id}/transcript` — transcript text
+- `GET /api/sessions/{session_id}/audio` — recorded WAV file
+
+Optional CORS configuration:
+
+```env
+WEB_UI_CORS_ORIGINS=*  # or comma-separated origins, e.g. https://my-ui.example.com
+```
+
 ---
 
 ## Storage
@@ -152,6 +168,8 @@ Each session writes two files:
 ```text
 storage/sessions/<session_id>.jsonl        # transcript + tool events
 storage/sessions/<session_id>_claim.json   # structured claim state (updated after each tool call)
+storage/sessions/<session_id>_transcript.txt # human-readable transcript
+storage/sessions/<session_id>_audio.wav      # recorded call audio (voice sessions)
 ```
 
 ---

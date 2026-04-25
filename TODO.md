@@ -4,7 +4,7 @@ Necessary
 - [x] Audio recording: save full audio to `storage/sessions/<id>_audio.wav` for voice sessions
 - [ ] Latency logging: log time from end-of-speech to first agent audio chunk per turn to `storage/sessions/<id>_latency.
 - [ ] Switch to handle everything as a car accident by default
-- [ ] Connect UI as WEB ui with live transcripts and visib ility of the state and stages etc 
+- [x] Connect UI as WEB ui with live transcripts and visib ility of the state and stages etc 
 - [ ] Add date and time to the system prompt
 - [ ] Session reconnection: save claim state and re-attach when Gemini hits the 15-min session limit or just runs into an error
 - [ ] Retry / graceful shutdown on Twilio WebSocket disconnect mid-call
