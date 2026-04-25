@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
 
@@ -45,6 +46,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve static files
+static_dir = ROOT / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 def _session_file_paths(storage_dir: Path, session_id: str) -> dict[str, Path]:
@@ -144,6 +150,15 @@ def _validate_env() -> None:
     missing = [k for k in required if not os.getenv(k)]
     if missing:
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
+
+
+@app.get("/")
+async def root() -> FileResponse:
+    """Serve the web UI."""
+    index_path = ROOT / "static" / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Web UI not found")
+    return FileResponse(index_path)
 
 
 @app.get("/api/sessions")

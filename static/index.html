@@ -1,0 +1,1013 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>inca — Session Conversations</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Cormorant+Garamond:ital,wght@0,400;0,500;1,400;1,500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <style>
+        /* Inca Design System Tokens */
+        :root {
+            /* Olive / forest */
+            --ink-900: #1F2410;
+            --ink-800: #2E331C;
+            --ink-700: #3D4128;
+            --ink-600: #4A4D2E;
+            --ink-500: #6B6E4A;
+            --ink-400: #8E906C;
+            --ink-300: #B5B698;
+            --ink-200: #D8D8C4;
+            --ink-100: #E9E7D6;
+            --ink-50:  #F1ECE0;
+
+            /* Cream */
+            --paper:   #F1ECE0;
+            --paper-2: #E7E0CE;
+            --paper-3: #D9CFB6;
+            --bone:    #F8F4E9;
+            --char:    #1F2410;
+
+            /* Mustard accent */
+            --mars-700: #6E6420;
+            --mars-600: #8C7E2A;
+            --mars-500: #A89C3D;
+            --mars-400: #BFB55C;
+            --mars-200: #DDD79A;
+            --mars-100: #ECE8C7;
+
+            /* Signal */
+            --ok:   oklch(58% 0.12 140);
+            --warn: oklch(70% 0.13 70);
+            --crit: oklch(55% 0.16 30);
+            --info: oklch(55% 0.08 220);
+
+            /* Typography */
+            --font-display: "Cormorant Garamond", "EB Garamond", serif;
+            --font-body:    "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
+            --font-mono:    "JetBrains Mono", ui-monospace, "SF Mono", monospace;
+
+            /* Radii */
+            --r-sm: 4px;
+            --r-md: 6px;
+            --r-lg: 8px;
+            --r-xl: 12px;
+            --r-pill: 999px;
+
+            /* Shadow */
+            --shadow-1: 0 1px 0 rgba(10,22,40,0.04), 0 1px 2px rgba(10,22,40,0.06);
+            --shadow-2: 0 1px 0 rgba(10,22,40,0.04), 0 6px 16px -6px rgba(10,22,40,0.12);
+
+            /* Spacing */
+            --s-2: 8px;
+            --s-3: 12px;
+            --s-4: 16px;
+            --s-5: 20px;
+            --s-6: 24px;
+            --s-7: 32px;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--ink-700);
+            color: var(--paper);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: var(--s-7);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--s-6);
+        }
+
+        .header-nav {
+            display: flex;
+            align-items: center;
+            gap: var(--s-4);
+        }
+
+        .back-btn {
+            display: none;
+            align-items: center;
+            gap: var(--s-2);
+            padding: 8px 14px;
+            background: transparent;
+            border: 1px solid var(--ink-600);
+            border-radius: var(--r-sm);
+            color: var(--ink-300);
+            font-family: var(--font-body);
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .back-btn.visible {
+            display: inline-flex;
+        }
+
+        .back-btn:hover {
+            background: var(--ink-600);
+            color: var(--paper);
+        }
+
+        h1 {
+            font-family: var(--font-display);
+            font-style: italic;
+            font-size: 48px;
+            font-weight: 400;
+            color: var(--mars-400);
+            letter-spacing: -0.01em;
+            line-height: 1.1;
+            margin: 0;
+        }
+
+        .filters {
+            background: var(--ink-800);
+            border: 1px solid var(--ink-600);
+            border-radius: var(--r-lg);
+            padding: var(--s-4);
+            margin-bottom: var(--s-5);
+            display: flex;
+            gap: var(--s-3);
+            align-items: center;
+        }
+
+        .filter-label {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--ink-400);
+            flex-shrink: 0;
+        }
+
+        .filter-input {
+            flex: 1;
+            max-width: 400px;
+            padding: 9px 14px;
+            background: var(--ink-700);
+            border: 1px solid var(--ink-600);
+            border-radius: var(--r-sm);
+            color: var(--paper);
+            font-family: var(--font-body);
+            font-size: 14px;
+        }
+
+        .filter-input::placeholder {
+            color: var(--ink-400);
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: var(--mars-500);
+            background: var(--ink-600);
+        }
+
+        .filter-stats {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            color: var(--ink-400);
+            margin-left: auto;
+        }
+
+        .sessions-list {
+            display: grid;
+            gap: var(--s-4);
+        }
+
+        .sessions-list.hidden {
+            display: none;
+        }
+
+        .session-detail-view {
+            display: none;
+        }
+
+        .session-detail-view.active {
+            display: block;
+        }
+
+        .session-card {
+            background: var(--bone);
+            border: 1px solid var(--ink-200);
+            border-radius: var(--r-lg);
+            padding: var(--s-5);
+            box-shadow: var(--shadow-1);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .session-card:hover {
+            box-shadow: var(--shadow-2);
+            border-color: var(--ink-300);
+        }
+
+        .session-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: var(--s-3);
+        }
+
+        .session-id {
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            color: var(--ink-500);
+            text-transform: uppercase;
+        }
+
+        .session-date {
+            font-size: 13px;
+            color: var(--ink-600);
+        }
+
+        .session-stage {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: var(--r-pill);
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            background: var(--mars-100);
+            color: var(--mars-700);
+        }
+
+        .session-stage::before {
+            content: "";
+            width: 6px;
+            height: 6px;
+            border-radius: var(--r-pill);
+            background: var(--mars-500);
+        }
+
+        .conversation {
+            margin-top: var(--s-4);
+            padding-top: var(--s-4);
+            border-top: 1px solid var(--ink-200);
+            display: none;
+            position: relative;
+        }
+
+        .conversation.active {
+            display: block;
+        }
+
+        .conversation-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: var(--s-4);
+        }
+
+        .conversation-title {
+            font-family: var(--font-mono);
+            font-size: 10.5px;
+            font-weight: 500;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--ink-500);
+        }
+
+        .close-conversation-btn {
+            background: transparent;
+            border: 1px solid var(--ink-200);
+            padding: 6px 12px;
+            border-radius: var(--r-sm);
+            font-family: var(--font-body);
+            font-size: 12px;
+            cursor: pointer;
+            color: var(--char);
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .close-conversation-btn:hover {
+            background: var(--paper-2);
+            border-color: var(--ink-300);
+        }
+
+        .message {
+            margin-bottom: var(--s-5);
+            position: relative;
+            display: flex;
+            align-items: flex-start;
+            gap: var(--s-2);
+        }
+
+        .message.user {
+            flex-direction: row-reverse;
+        }
+
+        .message-wrapper {
+            padding: var(--s-3) var(--s-4);
+            border-radius: var(--r-md);
+            max-width: 75%;
+            position: relative;
+        }
+
+        .message.user .message-wrapper {
+            background: var(--ink-800);
+            color: var(--paper);
+            text-align: right;
+            border: 1px solid var(--ink-600);
+        }
+
+        .message.agent .message-wrapper {
+            background: var(--paper);
+            color: var(--char);
+            border: 1px solid var(--ink-200);
+        }
+
+        .message-role {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            font-weight: 500;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            margin-bottom: var(--s-2);
+            opacity: 0.6;
+        }
+
+        .message-text {
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .message-actions {
+            flex-shrink: 0;
+            margin-top: 0;
+        }
+
+        .add-note-btn {
+            background: var(--paper);
+            border: 1px solid var(--ink-200);
+            padding: 6px 10px;
+            border-radius: var(--r-sm);
+            font-family: var(--font-body);
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            color: var(--char);
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+
+        .add-note-btn:hover {
+            background: var(--paper-2);
+            border-color: var(--ink-300);
+        }
+
+        .note-input {
+            margin-top: var(--s-2);
+            display: none;
+            position: absolute;
+            left: 0;
+            right: 0;
+            top: 100%;
+            z-index: 10;
+            background: var(--bone);
+            padding: var(--s-3);
+            border: 1px solid var(--ink-200);
+            border-radius: var(--r-sm);
+            box-shadow: var(--shadow-2);
+        }
+
+        .note-input.active {
+            display: block;
+        }
+
+        .note-input textarea {
+            width: 100%;
+            padding: var(--s-2) var(--s-3);
+            border: 1px solid var(--ink-200);
+            border-radius: var(--r-sm);
+            font-family: var(--font-body);
+            font-size: 13px;
+            color: var(--char);
+            background: var(--paper);
+            resize: vertical;
+            min-height: 70px;
+        }
+
+        .note-input-actions {
+            margin-top: var(--s-2);
+            display: flex;
+            gap: var(--s-2);
+        }
+
+        .note-input-actions button {
+            padding: 8px 14px;
+            border: none;
+            border-radius: var(--r-sm);
+            font-family: var(--font-body);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .save-note-btn {
+            background: var(--mars-500);
+            color: var(--ink-900);
+        }
+
+        .save-note-btn:hover {
+            background: var(--mars-600);
+        }
+
+        .cancel-note-btn {
+            background: transparent;
+            color: var(--char);
+            border: 1px solid var(--ink-200);
+        }
+
+        .cancel-note-btn:hover {
+            background: var(--paper-2);
+        }
+
+        .message-note {
+            margin-top: var(--s-3);
+            padding: var(--s-2) var(--s-3);
+            background: var(--mars-100);
+            border-left: 3px solid var(--mars-500);
+            border-radius: var(--r-sm);
+            font-size: 12.5px;
+            line-height: 1.5;
+            color: var(--mars-700);
+        }
+
+        .message.user .message-note {
+            background: rgba(168, 156, 61, 0.15);
+            border-left-color: var(--mars-400);
+            color: var(--mars-200);
+        }
+
+        .note-header {
+            font-family: var(--font-mono);
+            font-size: 9.5px;
+            font-weight: 600;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            opacity: 0.7;
+            margin-bottom: var(--s-2);
+        }
+
+        .loading {
+            text-align: center;
+            padding: var(--s-7);
+            color: var(--ink-300);
+            font-family: var(--font-mono);
+            font-size: 11px;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+        }
+
+        .error {
+            padding: var(--s-4);
+            background: oklch(94% 0.05 30);
+            color: var(--crit);
+            border: 1px solid var(--crit);
+            border-radius: var(--r-sm);
+            margin: var(--s-4) 0;
+            font-size: 13px;
+        }
+
+        .no-sessions {
+            text-align: center;
+            padding: var(--s-7) var(--s-5);
+            color: var(--ink-300);
+            font-family: var(--font-display);
+            font-style: italic;
+            font-size: 24px;
+        }
+
+        .artifacts {
+            display: flex;
+            gap: var(--s-2);
+            margin-top: var(--s-3);
+        }
+
+        .artifact {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            padding: 3px 8px;
+            border-radius: var(--r-pill);
+            background: var(--ink-100);
+            color: var(--ink-600);
+        }
+
+        .artifact.available {
+            background: oklch(94% 0.04 140);
+            color: var(--ok);
+        }
+
+        .artifact.available::before {
+            content: "";
+            width: 5px;
+            height: 5px;
+            border-radius: var(--r-pill);
+            background: var(--ok);
+        }
+
+        .stages {
+            margin-top: var(--s-3);
+            display: flex;
+            flex-wrap: wrap;
+            gap: var(--s-2);
+        }
+
+        .stage-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 3px 9px;
+            border-radius: var(--r-pill);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .stage-item.completed {
+            background: oklch(94% 0.04 140);
+            color: oklch(38% 0.11 140);
+        }
+
+        .stage-item.completed::before {
+            content: "";
+            width: 5px;
+            height: 5px;
+            border-radius: var(--r-pill);
+            background: var(--ok);
+        }
+
+        .stage-item.current {
+            background: var(--mars-100);
+            color: var(--mars-700);
+        }
+
+        .stage-item.current::before {
+            content: "";
+            width: 5px;
+            height: 5px;
+            border-radius: var(--r-pill);
+            background: var(--mars-500);
+        }
+
+        .stage-item.pending {
+            background: var(--ink-100);
+            color: var(--ink-500);
+        }
+
+        .stage-item.skipped {
+            background: var(--ink-50);
+            color: var(--ink-400);
+            opacity: 0.6;
+            text-decoration: line-through;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Session Conversations</h1>
+            <div class="header-nav">
+                <button class="back-btn" id="backBtn" onclick="goBackToList()">
+                    ← Back to sessions
+                </button>
+            </div>
+        </div>
+
+        <div id="mainView">
+            <div class="filters">
+                <span class="filter-label">Filter</span>
+                <input
+                    type="text"
+                    class="filter-input"
+                    id="filterInput"
+                    placeholder="Search by session ID, stage, or date..."
+                />
+                <span class="filter-stats" id="filterStats"></span>
+            </div>
+            <div id="content"></div>
+        </div>
+
+        <div id="detailView" class="session-detail-view"></div>
+    </div>
+
+    <script>
+        const API_BASE = '';
+
+        async function fetchSessions() {
+            try {
+                const response = await fetch(`${API_BASE}/api/sessions`);
+                if (!response.ok) {
+                    throw new Error(`API returned ${response.status}: ${response.statusText}`);
+                }
+                const data = await response.json();
+                console.log('Sessions data:', data);
+                return data.sessions || [];
+            } catch (error) {
+                console.error('Error fetching sessions:', error);
+                throw error;
+            }
+        }
+
+        async function fetchEvents(sessionId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/events`);
+                if (!response.ok) {
+                    console.warn(`Events not available for ${sessionId}`);
+                    return [];
+                }
+                const data = await response.json();
+                console.log('Events for', sessionId, ':', data);
+                return data.events || [];
+            } catch (error) {
+                console.error('Error fetching events:', error);
+                return [];
+            }
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'Unknown';
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        }
+
+        function renderMessage(event, index, sessionId) {
+            const isUser = event.role === 'user';
+            const role = isUser ? 'Caller' : 'Agent';
+            const text = event.content || event.text || '';
+            const messageId = `${sessionId}::${index}`;
+            const note = getNoteForMessage(messageId);
+
+            return `
+                <div class="message ${isUser ? 'user' : 'agent'}" data-message-id="${messageId}">
+                    <div class="message-wrapper">
+                        <div class="message-role">${role}</div>
+                        <div class="message-text">${escapeHtml(text)}</div>
+                        ${note ? `
+                            <div class="message-note">
+                                <div class="note-header">Note</div>
+                                ${escapeHtml(note)}
+                            </div>
+                        ` : ''}
+                        <div class="note-input" id="note-input-${messageId}">
+                            <textarea placeholder="Add a note about this message..."></textarea>
+                            <div class="note-input-actions">
+                                <button class="save-note-btn" onclick="saveNote('${messageId}')">Save</button>
+                                <button class="cancel-note-btn" onclick="cancelNote('${messageId}')">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="message-actions">
+                        <button class="add-note-btn" onclick="toggleNoteInput('${messageId}')">
+                            ${note ? 'Edit note' : 'Add note'}
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Note management using localStorage
+        function getNoteForMessage(messageId) {
+            const notes = JSON.parse(localStorage.getItem('message_notes') || '{}');
+            return notes[messageId] || null;
+        }
+
+        function saveNoteForMessage(messageId, note) {
+            const notes = JSON.parse(localStorage.getItem('message_notes') || '{}');
+            if (note.trim()) {
+                notes[messageId] = note.trim();
+            } else {
+                delete notes[messageId];
+            }
+            localStorage.setItem('message_notes', JSON.stringify(notes));
+        }
+
+        function toggleNoteInput(messageId) {
+            const input = document.getElementById(`note-input-${messageId}`);
+            const isActive = input.classList.contains('active');
+
+            // Close all other note inputs
+            document.querySelectorAll('.note-input.active').forEach(el => {
+                if (el.id !== `note-input-${messageId}`) {
+                    el.classList.remove('active');
+                }
+            });
+
+            if (!isActive) {
+                input.classList.add('active');
+                const textarea = input.querySelector('textarea');
+                const existingNote = getNoteForMessage(messageId);
+                textarea.value = existingNote || '';
+                textarea.focus();
+            } else {
+                input.classList.remove('active');
+            }
+        }
+
+        function saveNote(messageId) {
+            const input = document.getElementById(`note-input-${messageId}`);
+            const textarea = input.querySelector('textarea');
+            saveNoteForMessage(messageId, textarea.value);
+            input.classList.remove('active');
+
+            // Get session ID from messageId (split by :: separator)
+            const sessionId = messageId.split('::')[0];
+            const container = document.getElementById(`conversation-${sessionId}`);
+            loadConversation(sessionId, container);
+        }
+
+        function cancelNote(messageId) {
+            const input = document.getElementById(`note-input-${messageId}`);
+            input.classList.remove('active');
+        }
+
+        // URL management
+        function getSessionIdFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('session');
+        }
+
+        function setSessionInUrl(sessionId) {
+            const url = new URL(window.location);
+            if (sessionId) {
+                url.searchParams.set('session', sessionId);
+            } else {
+                url.searchParams.delete('session');
+            }
+            window.history.pushState({}, '', url);
+        }
+
+        function closeConversation(sessionId) {
+            const conversation = document.getElementById(`conversation-${sessionId}`);
+            if (conversation) {
+                conversation.classList.remove('active');
+                // Clear URL parameter
+                setSessionInUrl(null);
+            }
+        }
+
+        function renderStages(stages) {
+            if (!stages || stages.length === 0) return '';
+
+            return `
+                <div class="stages">
+                    ${stages.map(stage => `
+                        <span class="stage-item ${stage.status}">
+                            ${stage.name}
+                        </span>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        function renderSession(session) {
+            const artifacts = session.artifacts || {};
+            const stages = session.stages || [];
+
+            return `
+                <div class="session-card" data-session-id="${session.session_id}">
+                    <div class="session-header">
+                        <div>
+                            <div class="session-id">${session.session_id}</div>
+                            <div class="session-date">${formatDate(session.created_at)}</div>
+                            ${session.current_stage ? `<div style="margin-top: 8px;"><span class="session-stage">${session.current_stage}</span></div>` : ''}
+                            ${renderStages(stages)}
+                        </div>
+                    </div>
+                    <div class="artifacts">
+                        <span class="artifact ${artifacts.transcript ? 'available' : ''}">Transcript</span>
+                        <span class="artifact ${artifacts.audio ? 'available' : ''}">Audio</span>
+                        <span class="artifact ${artifacts.events ? 'available' : ''}">Events</span>
+                        <span class="artifact ${artifacts.claim ? 'available' : ''}">Claim</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function loadConversation(sessionId, container) {
+            try {
+                const events = await fetchEvents(sessionId);
+
+                // Filter to only show user and agent messages (not system or tool calls)
+                const messages = events.filter(e =>
+                    (e.role === 'user' || e.role === 'agent' || e.role === 'model') &&
+                    (e.content || e.text) &&
+                    e.role !== 'system'
+                );
+
+                console.log('Filtered messages:', messages.length);
+
+                const messagesHtml = messages.length === 0
+                    ? '<div style="padding: 20px; text-align: center; color: #666;">No messages in this session</div>'
+                    : messages.map((msg, idx) => renderMessage(msg, idx, sessionId)).join('');
+
+                // Preserve the header, only update the messages
+                const header = container.querySelector('.conversation-header');
+                container.innerHTML = '';
+                if (header) {
+                    container.appendChild(header);
+                } else {
+                    container.innerHTML = `
+                        <div class="conversation-header">
+                            <div class="conversation-title">Conversation</div>
+                            <button class="close-conversation-btn" onclick="closeConversation('${sessionId}')">Close ✕</button>
+                        </div>
+                    `;
+                }
+                const messagesDiv = document.createElement('div');
+                messagesDiv.innerHTML = messagesHtml;
+                container.appendChild(messagesDiv);
+            } catch (error) {
+                const header = container.querySelector('.conversation-header');
+                container.innerHTML = '';
+                if (header) {
+                    container.appendChild(header);
+                }
+                const errorDiv = document.createElement('div');
+                errorDiv.className = 'error';
+                errorDiv.textContent = `Failed to load conversation: ${error.message}`;
+                container.appendChild(errorDiv);
+            }
+        }
+
+        let allSessions = [];
+        let filteredSessions = [];
+
+        function filterSessions(query) {
+            if (!query.trim()) {
+                filteredSessions = allSessions;
+            } else {
+                const lowerQuery = query.toLowerCase();
+                filteredSessions = allSessions.filter(session => {
+                    return (
+                        session.session_id.toLowerCase().includes(lowerQuery) ||
+                        (session.current_stage && session.current_stage.toLowerCase().includes(lowerQuery)) ||
+                        (session.created_at && session.created_at.toLowerCase().includes(lowerQuery))
+                    );
+                });
+            }
+            updateFilterStats();
+            renderSessionsList();
+        }
+
+        function updateFilterStats() {
+            const stats = document.getElementById('filterStats');
+            if (stats) {
+                stats.textContent = `${filteredSessions.length} of ${allSessions.length} sessions`;
+            }
+        }
+
+        function renderSessionsList() {
+            const content = document.getElementById('content');
+            if (filteredSessions.length === 0) {
+                content.innerHTML = '<div class="no-sessions">No sessions match your filter.</div>';
+                return;
+            }
+            content.innerHTML = `<div class="sessions-list">${filteredSessions.map(renderSession).join('')}</div>`;
+            attachSessionClickHandlers();
+        }
+
+        function attachSessionClickHandlers() {
+            document.querySelectorAll('.session-card').forEach(card => {
+                card.addEventListener('click', async (e) => {
+                    const sessionId = card.dataset.sessionId;
+                    await showSessionDetail(sessionId);
+                });
+            });
+        }
+
+        async function showSessionDetail(sessionId) {
+            // Hide main view, show detail view
+            document.getElementById('mainView').style.display = 'none';
+            document.getElementById('detailView').classList.add('active');
+            document.getElementById('backBtn').classList.add('visible');
+
+            // Update URL
+            setSessionInUrl(sessionId);
+
+            // Find session data
+            const session = allSessions.find(s => s.session_id === sessionId);
+            if (!session) return;
+
+            // Render detail view
+            const detailView = document.getElementById('detailView');
+            detailView.innerHTML = `
+                <div class="session-card">
+                    <div class="session-header">
+                        <div>
+                            <div class="session-id">${session.session_id}</div>
+                            <div class="session-date">${formatDate(session.created_at)}</div>
+                            ${session.current_stage ? `<div style="margin-top: 8px;"><span class="session-stage">${session.current_stage}</span></div>` : ''}
+                            ${renderStages(session.stages || [])}
+                        </div>
+                    </div>
+                    <div class="artifacts">
+                        <span class="artifact ${session.artifacts?.transcript ? 'available' : ''}">Transcript</span>
+                        <span class="artifact ${session.artifacts?.audio ? 'available' : ''}">Audio</span>
+                        <span class="artifact ${session.artifacts?.events ? 'available' : ''}">Events</span>
+                        <span class="artifact ${session.artifacts?.claim ? 'available' : ''}">Claim</span>
+                    </div>
+                    <div class="conversation active" id="conversation-detail">
+                        <div class="conversation-header">
+                            <div class="conversation-title">Conversation</div>
+                        </div>
+                        <div class="loading">Loading conversation...</div>
+                    </div>
+                </div>
+            `;
+
+            // Load conversation
+            const conversation = document.getElementById('conversation-detail');
+            await loadConversation(sessionId, conversation);
+        }
+
+        function goBackToList() {
+            document.getElementById('mainView').style.display = 'block';
+            document.getElementById('detailView').classList.remove('active');
+            document.getElementById('backBtn').classList.remove('visible');
+            setSessionInUrl(null);
+        }
+
+        async function init() {
+            const content = document.getElementById('content');
+            content.innerHTML = '<div class="loading">Loading sessions...</div>';
+
+            try {
+                allSessions = await fetchSessions();
+                filteredSessions = allSessions;
+                console.log('Found sessions:', allSessions.length);
+
+                if (!allSessions || allSessions.length === 0) {
+                    content.innerHTML = '<div class="no-sessions">No sessions found. Start a session to see conversations here.</div>';
+                    return;
+                }
+
+                updateFilterStats();
+                renderSessionsList();
+
+                // Setup filter input
+                const filterInput = document.getElementById('filterInput');
+                if (filterInput) {
+                    filterInput.addEventListener('input', (e) => {
+                        filterSessions(e.target.value);
+                    });
+                }
+
+                // Check if URL has session parameter
+                const urlSessionId = getSessionIdFromUrl();
+                if (urlSessionId) {
+                    await showSessionDetail(urlSessionId);
+                }
+            } catch (error) {
+                content.innerHTML = `<div class="error">Failed to load sessions: ${error.message}</div>`;
+            }
+        }
+
+        // Auto-refresh every 30 seconds (only when on list view)
+        setInterval(() => {
+            const detailView = document.getElementById('detailView');
+            if (!detailView || !detailView.classList.contains('active')) {
+                init();
+            }
+        }, 30000);
+
+        // Initial load
+        init();
+    </script>
+</body>
+</html>
