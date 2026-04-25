@@ -87,7 +87,16 @@ VAD_END_SENSITIVITY=LOW
 
 # Set to false when using headphones or echo cancellation
 MUTE_MIC_DURING_PLAYBACK=true
+
+# Ambient office background bed (optional)
+AMBIENT_OFFICE_ENABLED=true
+AMBIENT_OFFICE_GAIN=0.5
+# Optional override; defaults to bundled loop in app/audio/assets/
+AMBIENT_OFFICE_FILE=
 ```
+
+Ambient office noise is mixed under agent speech during local playback and Twilio outbound playback. If the loop file is missing or invalid, the app logs a warning and continues without ambient noise.
+Sound attribution: The Office by Iwan Gabovitch under CC-BY 3.0 License.
 
 ### Run
 

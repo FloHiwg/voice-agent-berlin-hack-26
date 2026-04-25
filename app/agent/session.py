@@ -34,19 +34,260 @@ def new_session_id() -> str:
     return f"claim_{stamp}_{uuid4().hex[:4]}"
 
 
+class AudioRecorder:
+    """Records audio streams to WAV file for voice sessions."""
+
+    def __init__(self, storage_dir: Path, session_id: str, suffix: str = "audio", sample_rate: int = 24000) -> None:
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        self.audio_path = storage_dir / f"{session_id}_{suffix}.wav"
+        self.sample_rate = sample_rate
+        self.audio_chunks: list[bytes] = []
+        self.recording = True
+
+    def add_chunk(self, audio_data: bytes) -> None:
+        """Add audio chunk to recording buffer."""
+        if self.recording:
+            self.audio_chunks.append(audio_data)
+
+    def save(self) -> None:
+        """Save recorded audio to WAV file."""
+        if not self.audio_chunks:
+            return
+
+        try:
+            import wave
+            import numpy as np
+
+            # Combine all chunks
+            audio_bytes = b"".join(self.audio_chunks)
+
+            # Convert to numpy array (assuming 16-bit PCM)
+            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+
+            # Save as WAV
+            with wave.open(str(self.audio_path), "wb") as wav_file:
+                wav_file.setnchannels(1)  # Mono
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(self.sample_rate)
+                wav_file.writeframes(audio_array.tobytes())
+
+            print(f"\nAudio recording saved: {self.audio_path}", flush=True)
+        except Exception as e:
+            print(f"\nWarning: Failed to save audio recording: {e}", flush=True)
+
+    def to_array(self) -> "np.ndarray":
+        import numpy as np
+        if not self.audio_chunks:
+            return np.array([], dtype=np.int16)
+        return np.frombuffer(b"".join(self.audio_chunks), dtype=np.int16)
+
+    def stop(self) -> None:
+        """Stop recording and save."""
+        self.recording = False
+        self.save()
+
+
+def merge_audio_recordings(
+    caller_path: Path,
+    agent_path: Path,
+    output_path: Path,
+    target_rate: int = 16000,
+) -> None:
+    import wave
+    import numpy as np
+
+    def _read_wav(path: Path) -> tuple["np.ndarray", int]:
+        if not path.exists() or path.stat().st_size < 44:
+            return np.array([], dtype=np.int16), target_rate
+        with wave.open(str(path), "rb") as f:
+            rate = f.getframerate()
+            frames = f.readframes(f.getnframes())
+        return np.frombuffer(frames, dtype=np.int16), rate
+
+    def _resample(audio: "np.ndarray", orig_rate: int) -> "np.ndarray":
+        if orig_rate == target_rate or len(audio) == 0:
+            return audio
+        target_len = int(len(audio) * target_rate / orig_rate)
+        indices = np.linspace(0, len(audio) - 1, target_len)
+        return np.interp(indices, np.arange(len(audio)), audio).astype(np.int16)
+
+    try:
+        caller, caller_rate = _read_wav(caller_path)
+        agent, agent_rate = _read_wav(agent_path)
+
+        caller = _resample(caller, caller_rate)
+        agent = _resample(agent, agent_rate)
+
+        print(
+            f"\nMerging audio: caller={len(caller)/target_rate:.1f}s  agent={len(agent)/target_rate:.1f}s",
+            flush=True,
+        )
+
+        if len(caller) == 0 and len(agent) == 0:
+            return
+
+        length = max(len(caller), len(agent))
+        caller = np.pad(caller, (0, length - len(caller)))
+        agent = np.pad(agent, (0, length - len(agent)))
+
+        mixed = np.clip(caller.astype(np.int32) + agent.astype(np.int32), -32768, 32767).astype(np.int16)
+        stereo = np.column_stack((mixed, mixed))
+
+        with wave.open(str(output_path), "wb") as wav_file:
+            wav_file.setnchannels(2)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(target_rate)
+            wav_file.writeframes(stereo.tobytes())
+
+        print(f"Merged audio saved: {output_path}", flush=True)
+    except Exception as e:
+        print(f"\nWarning: Failed to merge audio recordings: {e}", flush=True)
+
+
+class FieldExtractor:
+    """Side-channel extractor: uses a text model to pull claim fields from transcribed speech."""
+
+    _PROMPT = """\
+Extract insurance claim fields from a customer's spoken response.
+
+Already collected (skip these): {filled}
+
+Agent asked: "{agent_question}"
+Customer answered: "{utterance}"
+
+Return a JSON object with dot-notation keys for any NEW fields clearly stated or implied by the answer in context.
+Valid keys: customer.full_name, customer.policy_number, customer.date_of_birth,
+customer.is_policyholder, customer.caller_name, customer.relationship_to_policyholder,
+claim_type, incident.date, incident.time, incident.location, incident.description,
+damage.items, damage.description, damage.estimated_value, damage.photos_available,
+third_parties.involved, third_parties.details, third_parties.witness_info,
+safety.injuries, safety.urgent_risk, safety.police_report, safety.police_report_details,
+services.rental_car_needed, services.rental_car_preference,
+services.repair_shop_selected, services.repair_shop_preference,
+documents.photos, documents.receipts
+
+Rules:
+- Use the agent's question to interpret short answers like "Yes", "No", a number, or a name.
+- Only extract values that are clearly stated or directly implied. Never guess.
+- customer.is_policyholder: true if caller says they ARE the policyholder, false if calling on behalf.
+- claim_type must be one of: auto accident, property damage, theft, injury, weather damage.
+- damage.items must be a list of strings.
+- Skip fields already present in "already collected".
+- Return {{}} if nothing new is extractable.
+- Return only valid JSON. No markdown fences, no explanation."""
+
+    def __init__(self, client: "genai.Client", model: str) -> None:
+        self.client = client
+        self.model = model
+
+    async def extract(self, utterance: str, agent_question: str, claim_state: "ClaimState") -> dict[str, Any]:
+        prompt = self._PROMPT.format(
+            filled=json.dumps(claim_state.filled_fields(), sort_keys=True),
+            agent_question=agent_question,
+            utterance=utterance,
+        )
+        for attempt in range(3):
+            try:
+                response = await self.client.aio.models.generate_content(
+                    model=self.model,
+                    contents=prompt,
+                )
+                text = (response.text or "").strip()
+                if text.startswith("```"):
+                    lines = text.splitlines()
+                    end = -1 if lines[-1].strip() == "```" else len(lines)
+                    text = "\n".join(lines[1:end])
+                return json.loads(text) if text else {}
+            except Exception as e:
+                if "429" in str(e) and attempt < 2:
+                    wait = 2 ** attempt
+                    print(f"[extractor] rate limited, retrying in {wait}s", flush=True)
+                    await asyncio.sleep(wait)
+                else:
+                    print(f"[extractor] error: {e}", flush=True)
+                    return {}
+        return {}
+
+
+async def _run_extraction(
+    extractor: FieldExtractor,
+    utterance: str,
+    agent_question: str,
+    handlers: "ClaimToolHandlers",
+    logger: "TranscriptLogger",
+) -> None:
+    print(f"\n[extractor] Q: {agent_question!r}", flush=True)
+    print(f"[extractor] A: {utterance!r}", flush=True)
+    extracted = await extractor.extract(utterance, agent_question, handlers.claim_state)
+    if extracted:
+        for key, value in extracted.items():
+            print(f"[extractor] {key} = {value!r}", flush=True)
+        logger.log("tool_call", {"name": "update_claim_state", "args": {"claim_update": extracted}, "via": "extractor"})
+        result = handlers.update_claim_state(extracted)
+        logger.log("tool_response", {"name": "update_claim_state", "result": result, "via": "extractor"})
+    else:
+        print("[extractor] nothing extracted", flush=True)
+
+
 class TranscriptLogger:
     def __init__(self, storage_dir: Path, session_id: str) -> None:
         storage_dir.mkdir(parents=True, exist_ok=True)
-        self.path = storage_dir / f"{session_id}.jsonl"
+        self.jsonl_path = storage_dir / f"{session_id}.jsonl"
+        self.transcript_path = storage_dir / f"{session_id}_transcript.txt"
+        self.session_start_time = datetime.now(UTC)
+
+        # Initialize transcript file with header
+        with self.transcript_path.open("w", encoding="utf-8") as f:
+            f.write(f"=== Call Transcript ===\n")
+            f.write(f"Session ID: {session_id}\n")
+            f.write(f"Started: {self.session_start_time.isoformat()}\n")
+            f.write(f"{'='*50}\n\n")
 
     def log(self, role: str, content: Any) -> None:
+        timestamp = datetime.now(UTC)
+
+        # Log to JSONL (existing format)
         record = {
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": timestamp.isoformat(),
             "role": role,
             "content": content,
         }
-        with self.path.open("a", encoding="utf-8") as handle:
+        with self.jsonl_path.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+        # Log to human-readable transcript
+        self._log_transcript(role, content, timestamp)
+
+    def _log_transcript(self, role: str, content: Any, timestamp: datetime) -> None:
+        """Write human-readable transcript entry."""
+        with self.transcript_path.open("a", encoding="utf-8") as f:
+            elapsed = (timestamp - self.session_start_time).total_seconds()
+            time_str = f"[{int(elapsed//60):02d}:{int(elapsed%60):02d}]"
+
+            if role == "user":
+                f.write(f"{time_str} USER: {content}\n\n")
+            elif role == "model":
+                f.write(f"{time_str} AGENT: {content}\n\n")
+            elif role == "tool_call":
+                tool_name = content.get("name", "unknown")
+                f.write(f"{time_str} [TOOL CALL: {tool_name}]\n")
+            elif role == "tool_response":
+                f.write(f"{time_str} [TOOL RESPONSE]\n")
+            elif role == "control":
+                f.write(f"{time_str} [SYSTEM: {content}]\n\n")
+            elif role == "session":
+                event = content.get("event", content)
+                f.write(f"{time_str} [SESSION: {event}]\n\n")
+
+    def finalize(self) -> None:
+        """Write session end marker to transcript."""
+        with self.transcript_path.open("a", encoding="utf-8") as f:
+            end_time = datetime.now(UTC)
+            duration = (end_time - self.session_start_time).total_seconds()
+            f.write(f"\n{'='*50}\n")
+            f.write(f"Session ended: {end_time.isoformat()}\n")
+            f.write(f"Total duration: {int(duration//60)}m {int(duration%60)}s\n")
+            f.write(f"{'='*50}\n")
 
 
 # ---------------------------------------------------------------------------
@@ -94,11 +335,15 @@ async def run_session(
 # Voice mode (Phase 2)
 # ---------------------------------------------------------------------------
 
-def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState) -> types.LiveConnectConfig:
+def _build_audio_config(
+    playbook_engine: PlaybookEngine,
+    claim_state: ClaimState,
+    transcription_enabled: bool = False,
+    caller_phone: str | None = None,
+) -> types.LiveConnectConfig:
     voice_name = os.getenv("GEMINI_VOICE", "Kore")
     silence_ms = int(os.getenv("VAD_SILENCE_MS", "800"))
 
-    # Map env-var string ("LOW", "HIGH") to SDK enum; fall back to LOW.
     def _start_sensitivity():
         name = os.getenv("VAD_START_SENSITIVITY", "LOW").upper()
         return getattr(types.StartSensitivity, f"START_SENSITIVITY_{name}", types.StartSensitivity.START_SENSITIVITY_LOW)
@@ -109,7 +354,7 @@ def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState
 
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
-        system_instruction=build_system_prompt(playbook_engine, claim_state, voice_mode=True),
+        system_instruction=build_system_prompt(playbook_engine, claim_state, voice_mode=True, caller_phone=caller_phone),
         tools=tools,
         speech_config=types.SpeechConfig(
             voice_config=types.VoiceConfig(
@@ -122,6 +367,14 @@ def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState
                 end_of_speech_sensitivity=_end_sensitivity(),
                 silence_duration_ms=silence_ms,
             )
+        ),
+        **(
+            {
+                "input_audio_transcription": types.AudioTranscriptionConfig(),
+                "output_audio_transcription": types.AudioTranscriptionConfig(),
+            }
+            if transcription_enabled
+            else {}
         ),
     )
 
@@ -136,105 +389,123 @@ async def _run_voice_session(
     from app.audio.input import send_audio
     from app.audio.output import play_audio, FLUSH
 
+    transcription_enabled = True
+    extractor_model = os.getenv("GEMINI_EXTRACTOR_MODEL", "gemini-3-flash-preview")
+    field_extractor = FieldExtractor(client, extractor_model)
+
     playbook_engine = PlaybookEngine.from_yaml(playbook_path)
     claim_state = ClaimState(session_id=new_session_id())
     claim_state.save(storage_dir)
     logger = TranscriptLogger(storage_dir, claim_state.session_id)
+    agent_recorder = AudioRecorder(storage_dir, claim_state.session_id, suffix="audio_agent", sample_rate=24000)
+    caller_recorder = AudioRecorder(storage_dir, claim_state.session_id, suffix="audio_caller", sample_rate=16000)
 
     print(f"Session ID: {claim_state.session_id}", flush=True)
     logger.log("session", {"session_id": claim_state.session_id, "mode": "voice"})
 
-    for attempt in range(_MAX_RECONNECT_ATTEMPTS):
-        config = _build_audio_config(playbook_engine, claim_state)
-        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+    try:
+        for attempt in range(_MAX_RECONNECT_ATTEMPTS):
+            config = _build_audio_config(playbook_engine, claim_state, transcription_enabled=transcription_enabled)
+            handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
 
-        try:
-            async with client.aio.live.connect(model=model, config=config) as session:
-                audio_queue: asyncio.Queue = asyncio.Queue()
-                speaking_event = (
-                    asyncio.Event()
-                    if _env_flag("MUTE_MIC_DURING_PLAYBACK", True)
-                    else None
-                )
-
-                receive_task = asyncio.create_task(
-                    _receive_voice_loop(
-                        session,
-                        handlers,
-                        logger,
-                        audio_queue,
-                        FLUSH,
-                        speaking_event=speaking_event,
+            try:
+                async with client.aio.live.connect(model=model, config=config) as session:
+                    audio_queue: asyncio.Queue = asyncio.Queue()
+                    speaking_event = (
+                        asyncio.Event()
+                        if _env_flag("MUTE_MIC_DURING_PLAYBACK", True)
+                        else None
                     )
-                )
-                play_task = asyncio.create_task(play_audio(audio_queue, speaking_event))
-                send_task = asyncio.create_task(send_audio(session, speaking_event))
 
-                if attempt == 0:
-                    greeting = "Begin the claims intake now. Greet the customer and ask for the first required field."
+                    receive_task = asyncio.create_task(
+                        _receive_voice_loop(
+                            session,
+                            handlers,
+                            logger,
+                            audio_queue,
+                            FLUSH,
+                            agent_recorder,
+                            transcription_enabled=transcription_enabled,
+                            speaking_event=speaking_event,
+                            field_extractor=field_extractor,
+                        )
+                    )
+                    play_task = asyncio.create_task(play_audio(audio_queue, speaking_event))
+                    send_task = asyncio.create_task(send_audio(session, speaking_event, on_chunk=caller_recorder.add_chunk))
+
+                    if attempt == 0:
+                        greeting = "Begin the claims intake now. Greet the customer and ask for the first required field."
+                    else:
+                        greeting = (
+                            f"Reconnecting after session timeout. {claim_state.summary()}. "
+                            "Continue the intake from where we left off."
+                        )
+                    await send_live_text(session, greeting)
+                    logger.log("control", greeting)
+
+                    done, pending = await asyncio.wait(
+                        {receive_task, play_task, send_task},
+                        return_when=asyncio.FIRST_EXCEPTION,
+                    )
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    for task in done:
+                        exc = task.exception()
+                        if isinstance(exc, SessionFinished):
+                            raise exc
+                        elif exc is not None:
+                            raise exc
+                    return claim_state
+
+            except SessionFinished as exc:
+                if exc.reason != "session_ended":
+                    raise
+                claim_state.save(storage_dir)
+                logger.log(
+                    "session",
+                    {
+                        "event": "disconnect",
+                        "attempt": attempt + 1,
+                        "reason": exc.reason,
+                    },
+                )
+                if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
+                    print(
+                        "\nLive session ended before the claim was completed. "
+                        f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
+                        flush=True,
+                    )
+                    await asyncio.sleep(2)
                 else:
-                    greeting = (
-                        f"Reconnecting after session timeout. {claim_state.summary()}. "
-                        "Continue the intake from where we left off."
+                    raise SessionFinished("reconnect_failed") from exc
+            except Exception as exc:
+                claim_state.save(storage_dir)
+                logger.log("session", {"event": "disconnect", "attempt": attempt + 1, "reason": str(exc)})
+                if _is_policy_violation(exc):
+                    print_exception(exc)
+                    raise SessionFinished("live_policy_violation") from exc
+                if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
+                    print(
+                        f"\nConnection lost ({exc}). "
+                        f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
+                        flush=True,
                     )
-                await send_live_text(session, greeting)
-                logger.log("control", greeting)
-
-                done, pending = await asyncio.wait(
-                    {receive_task, play_task, send_task},
-                    return_when=asyncio.FIRST_EXCEPTION,
-                )
-                for task in pending:
-                    task.cancel()
-                    try:
-                        await task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                for task in done:
-                    exc = task.exception()
-                    if isinstance(exc, SessionFinished):
-                        raise exc
-                    elif exc is not None:
-                        raise exc
-                return claim_state
-
-        except SessionFinished as exc:
-            if exc.reason != "session_ended":
-                raise
-            claim_state.save(storage_dir)
-            logger.log(
-                "session",
-                {
-                    "event": "disconnect",
-                    "attempt": attempt + 1,
-                    "reason": exc.reason,
-                },
-            )
-            if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
-                print(
-                    "\nLive session ended before the claim was completed. "
-                    f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
-                    flush=True,
-                )
-                await asyncio.sleep(2)
-            else:
-                raise SessionFinished("reconnect_failed") from exc
-        except Exception as exc:
-            claim_state.save(storage_dir)
-            logger.log("session", {"event": "disconnect", "attempt": attempt + 1, "reason": str(exc)})
-            if _is_policy_violation(exc):
-                print_exception(exc)
-                raise SessionFinished("live_policy_violation") from exc
-            if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
-                print(
-                    f"\nConnection lost ({exc}). "
-                    f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
-                    flush=True,
-                )
-                await asyncio.sleep(2)
-            else:
-                raise SessionFinished("reconnect_failed") from exc
-
+                    await asyncio.sleep(2)
+                else:
+                    raise SessionFinished("reconnect_failed") from exc
+    finally:
+        logger.finalize()
+        agent_recorder.stop()
+        caller_recorder.stop()
+        merge_audio_recordings(
+            caller_recorder.audio_path,
+            agent_recorder.audio_path,
+            storage_dir / f"{claim_state.session_id}_audio.wav",
+        )
     return claim_state
 
 
@@ -244,8 +515,12 @@ async def _receive_voice_loop(
     logger: TranscriptLogger,
     audio_queue: asyncio.Queue,
     flush_sentinel: object,
+    audio_recorder: AudioRecorder | None = None,
+    transcription_enabled: bool = False,
     speaking_event: asyncio.Event | None = None,
+    field_extractor: FieldExtractor | None = None,
 ) -> None:
+    agent_turn_buffer: list[str] = []
     while True:
         received_response = False
         async for response in session.receive():
@@ -262,9 +537,29 @@ async def _receive_voice_loop(
                 for part in getattr(model_turn, "parts", []) or []:
                     inline_data = getattr(part, "inline_data", None)
                     if inline_data and getattr(inline_data, "data", None):
+                        if audio_recorder:
+                            audio_recorder.add_chunk(inline_data.data)
                         if speaking_event:
                             speaking_event.set()
                         await audio_queue.put(inline_data.data)
+                if transcription_enabled:
+                    input_transcription = getattr(server_content, "input_transcription", None)
+                    if input_transcription:
+                        utterance = getattr(input_transcription, "text", None)
+                        if utterance and utterance.strip():
+                            logger.log("user", utterance.strip())
+                            if field_extractor:
+                                agent_question = " ".join(agent_turn_buffer)
+                                agent_turn_buffer.clear()
+                                asyncio.create_task(
+                                    _run_extraction(field_extractor, utterance.strip(), agent_question, handlers, logger)
+                                )
+                    output_transcription = getattr(server_content, "output_transcription", None)
+                    if output_transcription:
+                        text = getattr(output_transcription, "text", None)
+                        if text and text.strip():
+                            logger.log("model", text.strip())
+                            agent_turn_buffer.append(text.strip())
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call:
@@ -320,6 +615,7 @@ async def _run_text_session(
                 logger=logger,
                 eval_transcript=eval_transcript,
             )
+            logger.finalize()
             return claim_state
         except errors.APIError as exc:
             if transport == "live":
@@ -339,6 +635,7 @@ async def _run_text_session(
         eval_transcript=eval_transcript,
     )
 
+    logger.finalize()
     return claim_state
 
 

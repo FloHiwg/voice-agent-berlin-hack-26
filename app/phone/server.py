@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket
@@ -52,12 +53,19 @@ async def voice_webhook(request: Request) -> Response:
     """Return TwiML that connects the inbound call to the Media Streams WebSocket."""
     from twilio.twiml.voice_response import VoiceResponse, Connect, Stream  # type: ignore
 
+    form = await request.form()
+    caller_number = form.get("From", "")
+
     public_url = os.environ["TWILIO_PUBLIC_URL"].rstrip("/")
     ws_url = public_url.replace("https://", "wss://").replace("http://", "ws://")
 
+    stream_url = f"{ws_url}/twilio/media"
+    if caller_number:
+        stream_url += f"?from={quote(str(caller_number))}"
+
     response = VoiceResponse()
     connect = Connect()
-    stream = Stream(url=f"{ws_url}/twilio/media")
+    stream = Stream(url=stream_url)
     connect.append(stream)
     response.append(connect)
     return Response(content=str(response), media_type="application/xml")
@@ -68,6 +76,8 @@ async def media_stream(ws: WebSocket) -> None:
     """Handle a Twilio Media Streams WebSocket for one call."""
     from app.phone.bridge import run_twilio_bridge
 
+    caller_phone = ws.query_params.get("from") or None
+
     await ws.accept()
     await run_twilio_bridge(
         ws,
@@ -75,6 +85,7 @@ async def media_stream(ws: WebSocket) -> None:
         model=ws.app.state.model,
         playbook_path=ws.app.state.playbook_path,
         storage_dir=ws.app.state.storage_dir,
+        caller_phone=caller_phone,
     )
 
 

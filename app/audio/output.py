@@ -7,6 +7,8 @@ import sounddevice as sd
 
 _SAMPLE_RATE = 24000
 _PLAYBACK_TAIL_SECONDS = 0.25
+_AMBIENT_FRAME_SECONDS = 0.10
+_AMBIENT_FRAME_SAMPLES = int(_SAMPLE_RATE * _AMBIENT_FRAME_SECONDS)
 
 # Sentinel pushed to the queue by the receive loop on barge-in.
 FLUSH = object()
@@ -21,7 +23,14 @@ async def play_audio(
     stream.start()
     try:
         while True:
-            chunk = await queue.get()
+            try:
+                chunk = await asyncio.wait_for(queue.get(), timeout=_AMBIENT_FRAME_SECONDS)
+            except asyncio.TimeoutError:
+                if ambient_mixer is None:
+                    continue
+                ambient_only = ambient_mixer.mix(np.zeros(_AMBIENT_FRAME_SAMPLES, dtype=np.int16))
+                await asyncio.to_thread(stream.write, ambient_only)
+                continue
             if chunk is FLUSH:
                 # Drain any audio chunks that arrived before the interrupt signal.
                 while not queue.empty():
