@@ -36,11 +36,20 @@ class Damage(BaseModel):
 class ThirdParties(BaseModel):
     involved: bool | None = None
     details: str | None = None
+    witness_info: str | None = None
+
+
+class Services(BaseModel):
+    rental_car_needed: bool | None = None
+    rental_car_preference: str | None = None
+    repair_shop_selected: bool | None = None
+    repair_shop_preference: str | None = None
 
 
 class Safety(BaseModel):
     injuries: bool | str | None = None
     police_report: bool | None = None
+    police_report_details: str | None = None
     urgent_risk: bool | None = None
 
 
@@ -61,6 +70,7 @@ class ClaimState(BaseModel):
     third_parties: ThirdParties = Field(default_factory=ThirdParties)
     safety: Safety = Field(default_factory=Safety)
     documents: Documents = Field(default_factory=Documents)
+    services: Services = Field(default_factory=Services)
     handoff_required: bool = False
     risk_flags: list[str] = Field(default_factory=list)
     created_at: str = Field(default_factory=utc_now_iso)

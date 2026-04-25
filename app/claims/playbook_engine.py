@@ -12,7 +12,7 @@ from app.claims.claim_state import ClaimState, is_filled
 @dataclass(frozen=True)
 class PlaybookState:
     name: str
-    required: list[str]
+    required: dict[str, str | None]
     next: str | None
 
 
@@ -28,9 +28,17 @@ class PlaybookEngine:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))
         states: dict[str, PlaybookState] = {}
         for name, config in raw["states"].items():
+            reqs: dict[str, str | None] = {}
+            for item in config.get("required", []):
+                if isinstance(item, dict):
+                    for k, v in item.items():
+                        reqs[k] = v
+                else:
+                    reqs[item] = None
+
             states[name] = PlaybookState(
                 name=name,
-                required=list(config.get("required", [])),
+                required=reqs,
                 next=config.get("next"),
             )
         return cls(states)
@@ -51,24 +59,24 @@ class PlaybookEngine:
             stage_name = state.next
         raise ValueError("Playbook contains a cycle")
 
-    def get_missing_fields(self, claim_state: ClaimState) -> list[str]:
+    def get_missing_fields(self, claim_state: ClaimState) -> dict[str, str | None]:
         stage = self.current_stage(claim_state)
         if stage in {"done", "escalate"}:
-            return []
+            return {}
         return self._missing_for_state(claim_state, self.states[stage])
 
     def all_required_fields(self) -> list[str]:
         fields: list[str] = []
         for state_name in self.ordered_state_names:
-            fields.extend(self.states[state_name].required)
+            fields.extend(self.states[state_name].required.keys())
         return fields
 
     def _missing_for_state(
         self, claim_state: ClaimState, state: PlaybookState
-    ) -> list[str]:
-        missing: list[str] = []
-        for field_path in state.required:
+    ) -> dict[str, str | None]:
+        missing: dict[str, str | None] = {}
+        for field_path, hint in state.required.items():
             value: Any = claim_state.get_path(field_path)
             if not is_filled(value):
-                missing.append(field_path)
+                missing[field_path] = hint
         return missing
