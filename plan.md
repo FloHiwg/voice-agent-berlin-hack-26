@@ -572,19 +572,25 @@ Expose the local web server with a public HTTPS/WSS tunnel during demos. Configu
 
 **Checkpoint:** local voice demo is resilient enough to run repeatedly.
 
-### Session D — Twilio phone transport (hours 5–7)
+### Session D — Twilio phone transport (do this first)
 
-10. Add Twilio env var validation and REST client using API key auth
-11. Add `/twilio/voice`, `/twilio/media`, and `/twilio/status`
-12. Bridge Twilio μ-law 8kHz audio to Gemini 16kHz PCM input
-13. Bridge Gemini 24kHz PCM output back to Twilio μ-law 8kHz audio
-14. Add outbound demo call command and persist `callSid` with session logs
+The plan already has it fully spec'd. The work is:
+1. `app/twilio/client.py` — Twilio REST client with API key auth + outbound call helper
+2. `app/twilio/webhooks.py` — FastAPI app with `POST /twilio/voice` (TwiML) and `POST /twilio/status`
+3. `app/twilio/media_stream.py` — the WebSocket bridge: decode μ-law 8kHz → PCM 16kHz → Gemini, and back
+
+The existing `GeminiSession` in `app/agent/session.py` shouldn't need changes — just a new entry point that feeds it from Twilio instead of sounddevice.
 
 **Checkpoint:** complete claim intake over a real phone call.
 
-### Session E — Optional provider swap
+### Session E — Playbook depth (after Twilio works end-to-end)
 
-15. Replace local audio I/O or Twilio transport with telli if the demo needs that provider
+Once you have real phone calls you'll immediately feel where the playbook is shallow. The natural next areas:
+- Richer stages: witness info, police report follow-up, rental car preference, repair shop selection
+- Smarter `FIELD_EXPECTATIONS` — right now it's just descriptions; you could add validation hints or required sub-fields
+- A replay runner in `--text-mode` so you can iterate on the playbook YAML without making real calls
+
+**Checkpoint:** Deepened playbook flows with automated testing.
 
 ---
 
