@@ -75,6 +75,7 @@ class ClaimState(BaseModel):
 
     session_id: str
     claim_type: str | None = None
+    status: str | None = None
     customer: Customer = Field(default_factory=Customer)
     incident: Incident = Field(default_factory=Incident)
     damage: Damage = Field(default_factory=Damage)

@@ -700,6 +700,8 @@ async def run_generate_content_text_session(
         logger,
         "Begin the claims intake now. Greet the customer and ask for the first required field.",
         "control",
+        playbook_engine,
+        claim_state,
     )
 
     if eval_transcript:
@@ -711,7 +713,8 @@ async def run_generate_content_text_session(
         for user_input in lines:
             print(f"\nYou: {user_input}", flush=True)
             await generate_content_turn(
-                client, model, config, history, handlers, logger, user_input, "user"
+                client, model, config, history, handlers, logger, user_input, "user",
+                playbook_engine, claim_state
             )
             if handlers.finished_reason:
                 raise SessionFinished(handlers.finished_reason)
@@ -722,7 +725,8 @@ async def run_generate_content_text_session(
         if user_input.strip().lower() in {"exit", "quit"}:
             raise SessionFinished("user_exit")
         await generate_content_turn(
-            client, model, config, history, handlers, logger, user_input, "user"
+            client, model, config, history, handlers, logger, user_input, "user",
+            playbook_engine, claim_state
         )
         if handlers.finished_reason:
             raise SessionFinished(handlers.finished_reason)
@@ -737,6 +741,8 @@ async def generate_content_turn(
     logger: TranscriptLogger,
     text: str,
     role: str,
+    playbook_engine: PlaybookEngine,
+    claim_state: ClaimState,
 ) -> None:
     user_content = types.Content(role="user", parts=[types.Part(text=text)])
     history.append(user_content)
@@ -783,6 +789,9 @@ async def generate_content_turn(
         history.append(types.Content(role="tool", parts=response_parts))
         if handlers.finished_reason:
             raise SessionFinished(handlers.finished_reason)
+
+        # Rebuild system prompt with updated state after tool calls
+        config.system_instruction = build_system_prompt(playbook_engine, claim_state)
 
 
 async def send_text_loop(

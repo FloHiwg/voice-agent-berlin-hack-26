@@ -196,6 +196,8 @@ Expected values by field: {json.dumps(expected_values, sort_keys=True)}
 
 Rules:
 - {start_rule}
+- At the start of a new session, ALWAYS call retrieve_case_data with the phone number to look up any existing case data. If case data is found, it will populate the state automatically.
+- After retrieving case data, review the already-collected fields and continue from the next missing field.
 - Call update_claim_state after every user answer with only fields supported by the playbook or claim schema.
 - Use dot-notation keys when calling update_claim_state, for example customer.full_name.
 - Use the tool response's missing_fields and current_stage to decide the next question.

@@ -43,9 +43,44 @@ finalize_claim_tool = types.FunctionDeclaration(
     parameters=types.Schema(type=_schema_type("OBJECT"), properties={}),
 )
 
+retrieve_case_data_tool = types.FunctionDeclaration(
+    name="retrieve_case_data",
+    description="Retrieve existing case data from the insurance database using phone number or claim ID. Use at the start of a session to load customer information.",
+    parameters=types.Schema(
+        type=_schema_type("OBJECT"),
+        properties={
+            "phone_number": types.Schema(
+                type=_schema_type("STRING"),
+                description="Phone number in E.164 format (e.g., +49301234567). Optional if claim_id provided.",
+            ),
+            "claim_id": types.Schema(
+                type=_schema_type("STRING"),
+                description="Claim ID (e.g., CLM-2024-001). Optional if phone_number provided.",
+            ),
+        },
+    ),
+)
+
+update_case_status_tool = types.FunctionDeclaration(
+    name="update_case_status",
+    description="Update the status of the claim based on caller input or case progress. Valid statuses: pending_details, documentation_required, assessment_in_progress, approved, rejected, settled, closed, under_review.",
+    parameters=types.Schema(
+        type=_schema_type("OBJECT"),
+        properties={
+            "new_status": types.Schema(
+                type=_schema_type("STRING"),
+                description="The new status to set for the case. Must be one of the valid status values.",
+            ),
+        },
+        required=["new_status"],
+    ),
+)
+
 tools = [
     types.Tool(
         function_declarations=[
+            retrieve_case_data_tool,
+            update_case_status_tool,
             update_claim_state_tool,
             escalate_tool,
             finalize_claim_tool,
