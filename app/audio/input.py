@@ -32,7 +32,9 @@ async def send_audio(
         while True:
             chunk = await queue.get()
             if on_chunk:
-                on_chunk(chunk)
+                # Record silence during agent speech to prevent speaker bleed
+                is_suppressed = suppress_when is not None and suppress_when.is_set()
+                on_chunk(bytes(len(chunk)) if is_suppressed else chunk)
             if suppress_when and suppress_when.is_set():
                 continue
             await session.send_realtime_input(

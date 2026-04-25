@@ -109,7 +109,8 @@ async def run_twilio_bridge(
         agent_recorder.stop()
         caller_recorder.stop()
         merge_audio_recordings(
-            caller_recorder, agent_recorder,
+            caller_recorder.audio_path,
+            agent_recorder.audio_path,
             storage_dir / f"{claim_state.session_id}_audio.wav",
         )
 

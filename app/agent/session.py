@@ -88,15 +88,23 @@ class AudioRecorder:
 
 
 def merge_audio_recordings(
-    caller_recorder: "AudioRecorder",
-    agent_recorder: "AudioRecorder",
+    caller_path: Path,
+    agent_path: Path,
     output_path: Path,
     target_rate: int = 16000,
 ) -> None:
     import wave
     import numpy as np
 
-    def _resample(audio: np.ndarray, orig_rate: int) -> np.ndarray:
+    def _read_wav(path: Path) -> tuple["np.ndarray", int]:
+        if not path.exists() or path.stat().st_size < 44:
+            return np.array([], dtype=np.int16), target_rate
+        with wave.open(str(path), "rb") as f:
+            rate = f.getframerate()
+            frames = f.readframes(f.getnframes())
+        return np.frombuffer(frames, dtype=np.int16), rate
+
+    def _resample(audio: "np.ndarray", orig_rate: int) -> "np.ndarray":
         if orig_rate == target_rate or len(audio) == 0:
             return audio
         target_len = int(len(audio) * target_rate / orig_rate)
@@ -104,8 +112,16 @@ def merge_audio_recordings(
         return np.interp(indices, np.arange(len(audio)), audio).astype(np.int16)
 
     try:
-        caller = _resample(caller_recorder.to_array(), caller_recorder.sample_rate)
-        agent = _resample(agent_recorder.to_array(), agent_recorder.sample_rate)
+        caller, caller_rate = _read_wav(caller_path)
+        agent, agent_rate = _read_wav(agent_path)
+
+        caller = _resample(caller, caller_rate)
+        agent = _resample(agent, agent_rate)
+
+        print(
+            f"\nMerging audio: caller={len(caller)/target_rate:.1f}s  agent={len(agent)/target_rate:.1f}s",
+            flush=True,
+        )
 
         if len(caller) == 0 and len(agent) == 0:
             return
@@ -114,7 +130,8 @@ def merge_audio_recordings(
         caller = np.pad(caller, (0, length - len(caller)))
         agent = np.pad(agent, (0, length - len(agent)))
 
-        stereo = np.column_stack((caller, agent))
+        mixed = np.clip(caller.astype(np.int32) + agent.astype(np.int32), -32768, 32767).astype(np.int16)
+        stereo = np.column_stack((mixed, mixed))
 
         with wave.open(str(output_path), "wb") as wav_file:
             wav_file.setnchannels(2)
@@ -122,7 +139,7 @@ def merge_audio_recordings(
             wav_file.setframerate(target_rate)
             wav_file.writeframes(stereo.tobytes())
 
-        print(f"\nMerged audio saved: {output_path}", flush=True)
+        print(f"Merged audio saved: {output_path}", flush=True)
     except Exception as e:
         print(f"\nWarning: Failed to merge audio recordings: {e}", flush=True)
 
@@ -392,7 +409,8 @@ async def _run_voice_session(
         agent_recorder.stop()
         caller_recorder.stop()
         merge_audio_recordings(
-            caller_recorder, agent_recorder,
+            caller_recorder.audio_path,
+            agent_recorder.audio_path,
             storage_dir / f"{claim_state.session_id}_audio.wav",
         )
     return claim_state
