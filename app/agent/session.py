@@ -37,9 +37,9 @@ def new_session_id() -> str:
 class AudioRecorder:
     """Records audio streams to WAV file for voice sessions."""
 
-    def __init__(self, storage_dir: Path, session_id: str, sample_rate: int = 24000) -> None:
+    def __init__(self, storage_dir: Path, session_id: str, suffix: str = "audio", sample_rate: int = 24000) -> None:
         storage_dir.mkdir(parents=True, exist_ok=True)
-        self.audio_path = storage_dir / f"{session_id}_audio.wav"
+        self.audio_path = storage_dir / f"{session_id}_{suffix}.wav"
         self.sample_rate = sample_rate
         self.audio_chunks: list[bytes] = []
         self.recording = True
@@ -75,10 +75,56 @@ class AudioRecorder:
         except Exception as e:
             print(f"\nWarning: Failed to save audio recording: {e}", flush=True)
 
+    def to_array(self) -> "np.ndarray":
+        import numpy as np
+        if not self.audio_chunks:
+            return np.array([], dtype=np.int16)
+        return np.frombuffer(b"".join(self.audio_chunks), dtype=np.int16)
+
     def stop(self) -> None:
         """Stop recording and save."""
         self.recording = False
         self.save()
+
+
+def merge_audio_recordings(
+    caller_recorder: "AudioRecorder",
+    agent_recorder: "AudioRecorder",
+    output_path: Path,
+    target_rate: int = 16000,
+) -> None:
+    import wave
+    import numpy as np
+
+    def _resample(audio: np.ndarray, orig_rate: int) -> np.ndarray:
+        if orig_rate == target_rate or len(audio) == 0:
+            return audio
+        target_len = int(len(audio) * target_rate / orig_rate)
+        indices = np.linspace(0, len(audio) - 1, target_len)
+        return np.interp(indices, np.arange(len(audio)), audio).astype(np.int16)
+
+    try:
+        caller = _resample(caller_recorder.to_array(), caller_recorder.sample_rate)
+        agent = _resample(agent_recorder.to_array(), agent_recorder.sample_rate)
+
+        if len(caller) == 0 and len(agent) == 0:
+            return
+
+        length = max(len(caller), len(agent))
+        caller = np.pad(caller, (0, length - len(caller)))
+        agent = np.pad(agent, (0, length - len(agent)))
+
+        stereo = np.column_stack((caller, agent))
+
+        with wave.open(str(output_path), "wb") as wav_file:
+            wav_file.setnchannels(2)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(target_rate)
+            wav_file.writeframes(stereo.tobytes())
+
+        print(f"\nMerged audio saved: {output_path}", flush=True)
+    except Exception as e:
+        print(f"\nWarning: Failed to merge audio recordings: {e}", flush=True)
 
 
 class TranscriptLogger:
@@ -190,8 +236,8 @@ async def run_session(
 def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState) -> types.LiveConnectConfig:
     voice_name = os.getenv("GEMINI_VOICE", "Kore")
     silence_ms = int(os.getenv("VAD_SILENCE_MS", "800"))
+    transcription_enabled = _env_flag("VOICE_TRANSCRIPTION", False)
 
-    # Map env-var string ("LOW", "HIGH") to SDK enum; fall back to LOW.
     def _start_sensitivity():
         name = os.getenv("VAD_START_SENSITIVITY", "LOW").upper()
         return getattr(types.StartSensitivity, f"START_SENSITIVITY_{name}", types.StartSensitivity.START_SENSITIVITY_LOW)
@@ -216,6 +262,14 @@ def _build_audio_config(playbook_engine: PlaybookEngine, claim_state: ClaimState
                 silence_duration_ms=silence_ms,
             )
         ),
+        **(
+            {
+                "input_audio_transcription": types.AudioTranscriptionConfig(),
+                "output_audio_transcription": types.AudioTranscriptionConfig(),
+            }
+            if transcription_enabled
+            else {}
+        ),
     )
 
 
@@ -229,110 +283,118 @@ async def _run_voice_session(
     from app.audio.input import send_audio
     from app.audio.output import play_audio, FLUSH
 
+    transcription_enabled = _env_flag("VOICE_TRANSCRIPTION", False)
     playbook_engine = PlaybookEngine.from_yaml(playbook_path)
     claim_state = ClaimState(session_id=new_session_id())
     claim_state.save(storage_dir)
     logger = TranscriptLogger(storage_dir, claim_state.session_id)
-    audio_recorder = AudioRecorder(storage_dir, claim_state.session_id)
+    agent_recorder = AudioRecorder(storage_dir, claim_state.session_id, suffix="audio_agent", sample_rate=24000)
+    caller_recorder = AudioRecorder(storage_dir, claim_state.session_id, suffix="audio_caller", sample_rate=16000)
 
     print(f"Session ID: {claim_state.session_id}", flush=True)
     logger.log("session", {"session_id": claim_state.session_id, "mode": "voice"})
 
-    for attempt in range(_MAX_RECONNECT_ATTEMPTS):
-        config = _build_audio_config(playbook_engine, claim_state)
-        handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
+    try:
+        for attempt in range(_MAX_RECONNECT_ATTEMPTS):
+            config = _build_audio_config(playbook_engine, claim_state)
+            handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
 
-        try:
-            async with client.aio.live.connect(model=model, config=config) as session:
-                audio_queue: asyncio.Queue = asyncio.Queue()
-                speaking_event = (
-                    asyncio.Event()
-                    if _env_flag("MUTE_MIC_DURING_PLAYBACK", True)
-                    else None
-                )
-
-                receive_task = asyncio.create_task(
-                    _receive_voice_loop(
-                        session,
-                        handlers,
-                        logger,
-                        audio_queue,
-                        FLUSH,
-                        audio_recorder,
-                        speaking_event=speaking_event,
+            try:
+                async with client.aio.live.connect(model=model, config=config) as session:
+                    audio_queue: asyncio.Queue = asyncio.Queue()
+                    speaking_event = (
+                        asyncio.Event()
+                        if _env_flag("MUTE_MIC_DURING_PLAYBACK", True)
+                        else None
                     )
-                )
-                play_task = asyncio.create_task(play_audio(audio_queue, speaking_event))
-                send_task = asyncio.create_task(send_audio(session, speaking_event))
 
-                if attempt == 0:
-                    greeting = "Begin the claims intake now. Greet the customer and ask for the first required field."
+                    receive_task = asyncio.create_task(
+                        _receive_voice_loop(
+                            session,
+                            handlers,
+                            logger,
+                            audio_queue,
+                            FLUSH,
+                            agent_recorder,
+                            transcription_enabled=transcription_enabled,
+                            speaking_event=speaking_event,
+                        )
+                    )
+                    play_task = asyncio.create_task(play_audio(audio_queue, speaking_event))
+                    send_task = asyncio.create_task(send_audio(session, speaking_event, on_chunk=caller_recorder.add_chunk))
+
+                    if attempt == 0:
+                        greeting = "Begin the claims intake now. Greet the customer and ask for the first required field."
+                    else:
+                        greeting = (
+                            f"Reconnecting after session timeout. {claim_state.summary()}. "
+                            "Continue the intake from where we left off."
+                        )
+                    await send_live_text(session, greeting)
+                    logger.log("control", greeting)
+
+                    done, pending = await asyncio.wait(
+                        {receive_task, play_task, send_task},
+                        return_when=asyncio.FIRST_EXCEPTION,
+                    )
+                    for task in pending:
+                        task.cancel()
+                        try:
+                            await task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+                    for task in done:
+                        exc = task.exception()
+                        if isinstance(exc, SessionFinished):
+                            raise exc
+                        elif exc is not None:
+                            raise exc
+                    return claim_state
+
+            except SessionFinished as exc:
+                if exc.reason != "session_ended":
+                    raise
+                claim_state.save(storage_dir)
+                logger.log(
+                    "session",
+                    {
+                        "event": "disconnect",
+                        "attempt": attempt + 1,
+                        "reason": exc.reason,
+                    },
+                )
+                if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
+                    print(
+                        "\nLive session ended before the claim was completed. "
+                        f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
+                        flush=True,
+                    )
+                    await asyncio.sleep(2)
                 else:
-                    greeting = (
-                        f"Reconnecting after session timeout. {claim_state.summary()}. "
-                        "Continue the intake from where we left off."
+                    raise SessionFinished("reconnect_failed") from exc
+            except Exception as exc:
+                claim_state.save(storage_dir)
+                logger.log("session", {"event": "disconnect", "attempt": attempt + 1, "reason": str(exc)})
+                if _is_policy_violation(exc):
+                    print_exception(exc)
+                    raise SessionFinished("live_policy_violation") from exc
+                if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
+                    print(
+                        f"\nConnection lost ({exc}). "
+                        f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
+                        flush=True,
                     )
-                await send_live_text(session, greeting)
-                logger.log("control", greeting)
-
-                done, pending = await asyncio.wait(
-                    {receive_task, play_task, send_task},
-                    return_when=asyncio.FIRST_EXCEPTION,
-                )
-                for task in pending:
-                    task.cancel()
-                    try:
-                        await task
-                    except (asyncio.CancelledError, Exception):
-                        pass
-                for task in done:
-                    exc = task.exception()
-                    if isinstance(exc, SessionFinished):
-                        raise exc
-                    elif exc is not None:
-                        raise exc
-                return claim_state
-
-        except SessionFinished as exc:
-            if exc.reason != "session_ended":
-                raise
-            claim_state.save(storage_dir)
-            logger.log(
-                "session",
-                {
-                    "event": "disconnect",
-                    "attempt": attempt + 1,
-                    "reason": exc.reason,
-                },
-            )
-            if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
-                print(
-                    "\nLive session ended before the claim was completed. "
-                    f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
-                    flush=True,
-                )
-                await asyncio.sleep(2)
-            else:
-                raise SessionFinished("reconnect_failed") from exc
-        except Exception as exc:
-            claim_state.save(storage_dir)
-            logger.log("session", {"event": "disconnect", "attempt": attempt + 1, "reason": str(exc)})
-            if _is_policy_violation(exc):
-                print_exception(exc)
-                raise SessionFinished("live_policy_violation") from exc
-            if attempt < _MAX_RECONNECT_ATTEMPTS - 1:
-                print(
-                    f"\nConnection lost ({exc}). "
-                    f"Reconnecting ({attempt + 2}/{_MAX_RECONNECT_ATTEMPTS})...",
-                    flush=True,
-                )
-                await asyncio.sleep(2)
-            else:
-                raise SessionFinished("reconnect_failed") from exc
-
-    # Finalize recordings
-    logger.finalize()
-    audio_recorder.stop()
+                    await asyncio.sleep(2)
+                else:
+                    raise SessionFinished("reconnect_failed") from exc
+    finally:
+        logger.finalize()
+        agent_recorder.stop()
+        caller_recorder.stop()
+        merge_audio_recordings(
+            caller_recorder, agent_recorder,
+            storage_dir / f"{claim_state.session_id}_audio.wav",
+        )
     return claim_state
 
 
@@ -342,7 +404,8 @@ async def _receive_voice_loop(
     logger: TranscriptLogger,
     audio_queue: asyncio.Queue,
     flush_sentinel: object,
-    audio_recorder: AudioRecorder,
+    audio_recorder: AudioRecorder | None = None,
+    transcription_enabled: bool = False,
     speaking_event: asyncio.Event | None = None,
 ) -> None:
     while True:
@@ -361,11 +424,22 @@ async def _receive_voice_loop(
                 for part in getattr(model_turn, "parts", []) or []:
                     inline_data = getattr(part, "inline_data", None)
                     if inline_data and getattr(inline_data, "data", None):
-                        # Record audio chunk
-                        audio_recorder.add_chunk(inline_data.data)
+                        if audio_recorder:
+                            audio_recorder.add_chunk(inline_data.data)
                         if speaking_event:
                             speaking_event.set()
                         await audio_queue.put(inline_data.data)
+                if transcription_enabled:
+                    input_transcription = getattr(server_content, "input_transcription", None)
+                    if input_transcription:
+                        text = getattr(input_transcription, "text", None)
+                        if text and text.strip():
+                            logger.log("user", text.strip())
+                    output_transcription = getattr(server_content, "output_transcription", None)
+                    if output_transcription:
+                        text = getattr(output_transcription, "text", None)
+                        if text and text.strip():
+                            logger.log("model", text.strip())
 
             tool_call = getattr(response, "tool_call", None)
             if tool_call:

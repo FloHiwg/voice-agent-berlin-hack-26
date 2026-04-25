@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import sounddevice as sd
@@ -13,6 +14,7 @@ _CHUNK_FRAMES = 1024
 async def send_audio(
     session: Any,
     suppress_when: asyncio.Event | None = None,
+    on_chunk: Callable[[bytes], None] | None = None,
 ) -> None:
     loop = asyncio.get_event_loop()
     queue: asyncio.Queue[bytes] = asyncio.Queue()
@@ -29,6 +31,8 @@ async def send_audio(
     ):
         while True:
             chunk = await queue.get()
+            if on_chunk:
+                on_chunk(chunk)
             if suppress_when and suppress_when.is_set():
                 continue
             await session.send_realtime_input(
