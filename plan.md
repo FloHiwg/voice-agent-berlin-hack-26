@@ -166,39 +166,7 @@ No filler audio needed — the session is always warm and the model starts strea
 
 ---
 
-## Phase 3: Architecture
-
-```text
-app/
-  main.py             # CLI entry point; --twilio-setup / --twilio-server flags
-  phone/
-    server.py         # FastAPI app: POST /twilio/voice, WS /twilio/media, POST /twilio/status
-    bridge.py         # Twilio Media Streams ↔ Gemini Live WebSocket bridge
-    audio.py          # G.711 μ-law codec (numpy, Python 3.13-safe) + PCM resampling
-  audio/
-    input.py          # sounddevice mic capture → PCM chunks
-    output.py         # PCM chunk playback + barge-in handling
-  agent/
-    session.py        # Live API WebSocket session lifecycle
-    tools.py          # function call handlers (update_claim_state, escalate)
-    prompts.py        # system prompt builder (injects playbook + current state)
-    schemas.py        # Pydantic models for tool payloads
-  claims/
-    playbook.yaml     # state machine definition
-    playbook_engine.py
-    claim_state.py
-    validators.py
-  storage/
-    sessions/
-      claim_session.json
-  evals/
-    test_conversations.yaml
-  .env
-```
-
----
-
-## Phase 4: Claim State
+## Phase 3: Claim State
 
 Keep a structured Pydantic object from the start.
 
@@ -242,7 +210,7 @@ Keep a structured Pydantic object from the start.
 
 ---
 
-## Phase 5: Playbook Design
+## Phase 4: Playbook Design
 
 The playbook YAML defines required fields per state. The playbook engine determines what's missing and what to ask next. This is **injected into the system prompt** at session start and updated via tool call responses.
 
@@ -288,7 +256,7 @@ states:
 
 ---
 
-## Phase 6: Function Calling Tools
+## Phase 5: Function Calling Tools
 
 Instead of a structured JSON response schema, the model calls Python functions to update state. The Live API invokes these synchronously (sequential tool use only — async/NON_BLOCKING not supported in 3.1 Flash Live).
 
@@ -331,7 +299,7 @@ The model decides when to call these based on the conversation. The system promp
 
 ---
 
-## Phase 7: System Prompt Strategy
+## Phase 6: System Prompt Strategy
 
 The system prompt is built at session start and includes:
 
@@ -363,7 +331,7 @@ Do not rebuild the session mid-call to update the prompt. Use tool call return v
 
 ---
 
-## Phase 8: Conversation Loop
+## Phase 7: Conversation Loop
 
 Full async pattern using `google-genai` Live client:
 
@@ -457,7 +425,7 @@ Replace `send_audio` with an `async` stdin reader and `receive_audio` with a tex
 
 ---
 
-## Phase 9: Session Limits & Reconnection
+## Phase 8: Session Limits & Reconnection
 
 - Audio-only sessions: **15 minute maximum**
 - On timeout or disconnect: save current claim state to JSON, reconnect, inject saved state into new session prompt
@@ -475,7 +443,7 @@ async def run_with_reconnect():
 
 ---
 
-## Phase 10: Latency Logging
+## Phase 9: Latency Logging
 
 Log per-turn timing from the first audio chunk sent to the first audio chunk received:
 
@@ -493,13 +461,13 @@ Write to `storage/sessions/<session_id>_latency.jsonl`.
 
 ---
 
-## Phase 11: Upgrade Path to telli
+## Phase 10: Upgrade Path to telli
 
 Replace `sounddevice` with telli WebSocket call events and telli audio streaming. The session management, playbook engine, function call handlers, and claim state stay unchanged. Pass `response_modalities=["AUDIO", "TEXT"]` and forward the text to telli instead of playing PCM locally.
 
 ---
 
-## Phase 12: Twilio Phone Integration
+## Phase 11: Twilio Phone Integration
 
 Twilio becomes the first real phone transport. Keep the Gemini session, claim state, playbook engine, tools, and prompt builder unchanged; only replace local microphone/speaker I/O with a Twilio Media Streams bridge.
 
