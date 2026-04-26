@@ -297,8 +297,9 @@
 
         .session-header {
             display: flex;
-            flex-direction: column;
-            gap: var(--sp-2);
+            flex-direction: row;
+            justify-content: flex-end;
+            align-items: flex-start;
         }
 
         .session-info {
@@ -1602,16 +1603,9 @@
             detailView.innerHTML = `
                 <div class="session-card">
                     <div class="session-header">
-                        <div>
-                            <div class="session-id">${sid}</div>
-                            <div class="session-date">${formatDate(session.created_at)}</div>
-                            ${session.current_stage ? `<div style="margin-top: 6px; font-size: 13px; color: var(--on-surface-variant);">Stage: <strong>${session.current_stage}</strong></div>` : ''}
-                        </div>
-                        <div>
-                            <a href="https://www.get-inca.com/" target="_blank" rel="noopener noreferrer" class="cta-button">
-                                Start Case Processing →
-                            </a>
-                        </div>
+                        <a href="https://www.get-inca.com/" target="_blank" rel="noopener noreferrer" class="cta-button">
+                            Start Case Processing
+                        </a>
                     </div>
 
                     ${hasAudio ? `
