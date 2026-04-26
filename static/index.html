@@ -123,6 +123,34 @@
         .back-btn.visible { display: inline-flex; }
         .back-btn:hover { border-color: var(--outline); color: var(--on-surface); }
 
+        .cta-button {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--sp-2);
+            padding: 12px 24px;
+            background: var(--primary);
+            color: var(--on-primary);
+            border: none;
+            border-radius: var(--r-pill);
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            box-shadow: 0 2px 8px rgba(85, 101, 0, 0.2);
+        }
+
+        .cta-button:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(85, 101, 0, 0.3);
+        }
+
+        .cta-button:active {
+            transform: translateY(0);
+        }
+
         /* ── Filters ── */
         .filters {
             background: var(--surface-container-low);
@@ -1578,6 +1606,11 @@
                             <div class="session-id">${sid}</div>
                             <div class="session-date">${formatDate(session.created_at)}</div>
                             ${session.current_stage ? `<div style="margin-top: 6px; font-size: 13px; color: var(--on-surface-variant);">Stage: <strong>${session.current_stage}</strong></div>` : ''}
+                        </div>
+                        <div>
+                            <a href="https://www.get-inca.com/" target="_blank" rel="noopener noreferrer" class="cta-button">
+                                Start Case Processing →
+                            </a>
                         </div>
                     </div>
 
