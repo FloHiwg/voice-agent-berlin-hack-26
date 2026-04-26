@@ -88,6 +88,18 @@
             border-bottom: 1px solid var(--outline-variant);
         }
 
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-4);
+        }
+
+        .inca-logo-img {
+            height: 48px;
+            width: auto;
+            object-fit: contain;
+        }
+
         .header-nav {
             display: flex;
             align-items: center;
@@ -898,7 +910,10 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Inca Call Log Manager</h1>
+            <div class="header-left">
+                <img src="/static/inca_logo.png" alt="Inca Logo" class="inca-logo-img">
+                <h1>Inca Call Log Manager</h1>
+            </div>
             <div class="header-nav">
                 <button class="back-btn" id="backBtn" onclick="goBackToList()">
                     ← Back to sessions
