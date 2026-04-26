@@ -155,12 +155,10 @@
 
         .cta-button:hover {
             opacity: 0.9;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(85, 101, 0, 0.3);
         }
 
         .cta-button:active {
-            transform: translateY(0);
+            opacity: 0.8;
         }
 
         /* ── Filters ── */
@@ -832,15 +830,16 @@
         /* Claim sections */
         .claim-sections { display: flex; flex-direction: column; gap: var(--sp-4); }
 
-        .claim-section-with-cta {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: var(--sp-4);
+        .claim-fields-with-cta {
+            position: relative;
         }
 
-        .claim-section-with-cta > div:first-child {
-            flex: 1;
+        .cta-overlay {
+            position: absolute;
+            top: 24px;
+            right: 0;
+            transform: translateY(-50%);
+            z-index: 1;
         }
 
         .claim-section-title {
@@ -1136,18 +1135,16 @@
             return `
                 <div class="claim-sections">
                     ${filledSections.map((s, idx) => `
-                        <div class="${idx === 0 ? 'claim-section-with-cta' : ''}">
-                            <div>
-                                <div class="claim-section-title">${s.title}</div>
-                                <div class="claim-fields">
-                                    ${s.fields.map(([label, value]) => renderClaimField(label, value)).join('')}
-                                </div>
+                        <div>
+                            <div class="claim-section-title">${s.title}</div>
+                            <div class="claim-fields ${idx === 0 ? 'claim-fields-with-cta' : ''}">
+                                ${s.fields.map(([label, value]) => renderClaimField(label, value)).join('')}
+                                ${idx === 0 ? `
+                                    <a href="https://www.get-inca.com/" target="_blank" rel="noopener noreferrer" class="cta-button cta-overlay">
+                                        Start Case Processing
+                                    </a>
+                                ` : ''}
                             </div>
-                            ${idx === 0 ? `
-                                <a href="https://www.get-inca.com/" target="_blank" rel="noopener noreferrer" class="cta-button">
-                                    Start Case Processing
-                                </a>
-                            ` : ''}
                         </div>
                     `).join('')}
                 </div>
