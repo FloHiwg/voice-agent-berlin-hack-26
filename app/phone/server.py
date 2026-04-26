@@ -162,6 +162,15 @@ async def root() -> FileResponse:
     return FileResponse(index_path)
 
 
+@app.get("/main")
+async def main_view() -> FileResponse:
+    """Serve the web UI main view."""
+    index_path = ROOT / "static" / "index.html"
+    if not index_path.exists():
+        raise HTTPException(status_code=404, detail="Web UI not found")
+    return FileResponse(index_path)
+
+
 @app.get("/api/sessions")
 async def list_sessions() -> dict[str, Any]:
     storage_dir: Path = app.state.storage_dir
