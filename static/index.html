@@ -174,7 +174,74 @@
         .session-detail-view { display: none; }
         .session-detail-view.active { display: block; }
 
-        /* ── Session card ── */
+        /* ── Sessions Table ── */
+        .sessions-table-container {
+            background: var(--surface-container-lowest);
+            border: 1px solid var(--outline-variant);
+            border-radius: var(--r-xl);
+            overflow: hidden;
+        }
+
+        .sessions-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .sessions-table thead {
+            background: var(--surface-container);
+        }
+
+        .sessions-table th {
+            padding: var(--sp-3) var(--sp-4);
+            text-align: left;
+            font-family: var(--font-body);
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--outline);
+            border-bottom: 1px solid var(--outline-variant);
+        }
+
+        .session-row {
+            cursor: pointer;
+            transition: background-color 0.15s;
+            border-bottom: 1px solid var(--outline-variant);
+        }
+
+        .session-row:last-child {
+            border-bottom: none;
+        }
+
+        .session-row:hover {
+            background: var(--surface-container-low);
+        }
+
+        .sessions-table td {
+            padding: var(--sp-3) var(--sp-4);
+            font-family: var(--font-body);
+        }
+
+        .session-date-cell {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--on-surface);
+            white-space: nowrap;
+        }
+
+        .session-policy-cell {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--on-surface-variant);
+        }
+
+        .session-customer-cell {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--on-surface-variant);
+        }
+
+        /* Legacy card styles (kept for detail view) */
         .session-card {
             background: var(--surface-container-lowest);
             border: 1px solid var(--outline-variant);
@@ -1181,15 +1248,11 @@
             const createdDate = formatDate(session.created_at);
 
             return `
-                <div class="session-card" data-session-id="${session.session_id}">
-                    <div class="session-header">
-                        <div class="session-info">
-                            <div class="session-date">${createdDate}</div>
-                            <div class="session-detail">Policy: ${escapeHtml(policyNumber)}</div>
-                            <div class="session-detail">Customer: ${escapeHtml(customerName)}</div>
-                        </div>
-                    </div>
-                </div>
+                <tr class="session-row" data-session-id="${session.session_id}">
+                    <td class="session-date-cell">${createdDate}</td>
+                    <td class="session-policy-cell">${escapeHtml(policyNumber)}</td>
+                    <td class="session-customer-cell">${escapeHtml(customerName)}</td>
+                </tr>
             `;
         }
 
@@ -1296,14 +1359,29 @@
                 content.innerHTML = '<div class="no-sessions">No sessions match your filter.</div>';
                 return;
             }
-            content.innerHTML = `<div class="sessions-list">${filteredSessions.map(renderSession).join('')}</div>`;
+            content.innerHTML = `
+                <div class="sessions-table-container">
+                    <table class="sessions-table">
+                        <thead>
+                            <tr>
+                                <th>Date & Time</th>
+                                <th>Policy Number</th>
+                                <th>Customer Name</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${filteredSessions.map(renderSession).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
             attachSessionClickHandlers();
         }
 
         function attachSessionClickHandlers() {
-            document.querySelectorAll('.session-card').forEach(card => {
-                card.addEventListener('click', async () => {
-                    await showSessionDetail(card.dataset.sessionId);
+            document.querySelectorAll('.session-row').forEach(row => {
+                row.addEventListener('click', async () => {
+                    await showSessionDetail(row.dataset.sessionId);
                 });
             });
         }
