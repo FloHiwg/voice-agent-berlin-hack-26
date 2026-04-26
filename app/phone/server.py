@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 _AUDIO_ASSETS_DIR = ROOT / "app" / "audio" / "assets"
 _PRE_CONNECT_PAUSE_SECONDS = 3
 _JINGLE_SOUND_CLIP_SECONDS = 5
+_BEEP_SOUND_CLIP_SECONDS = 5
 
 
 @asynccontextmanager
@@ -240,6 +241,7 @@ async def voice_webhook(request: Request) -> Response:
 
     jingle_voice_exists = (_AUDIO_ASSETS_DIR / "jingle_voice.wav").exists()
     jingle_sound_exists = (_AUDIO_ASSETS_DIR / "jingle_sound.wav").exists()
+    beep_sound_exists = (_AUDIO_ASSETS_DIR / "beep.wav").exists()
 
     response = VoiceResponse()
     response.pause(length=_PRE_CONNECT_PAUSE_SECONDS)
@@ -249,7 +251,10 @@ async def voice_webhook(request: Request) -> Response:
         response.say("Please hold while we connect you to an agent.")
     if jingle_sound_exists:
         response.play(f"{public_url}/twilio/audio/jingle_sound.wav?seconds={_JINGLE_SOUND_CLIP_SECONDS}")
-    response.pause(length=_PRE_CONNECT_PAUSE_SECONDS)
+    if beep_sound_exists:
+        response.play(f"{public_url}/twilio/audio/beep.wav?seconds={_BEEP_SOUND_CLIP_SECONDS}")
+    else:
+        response.pause(length=_PRE_CONNECT_PAUSE_SECONDS)
     connect = Connect()
     stream = Stream(url=stream_url)
     connect.append(stream)
@@ -260,7 +265,7 @@ async def voice_webhook(request: Request) -> Response:
 @app.get("/twilio/audio/{asset_name}")
 async def twilio_audio_asset(asset_name: str, seconds: int | None = None) -> Response:
     """Serve call-intro audio assets with optional clipping."""
-    if asset_name not in {"jingle_voice.wav", "jingle_sound.wav"}:
+    if asset_name not in {"jingle_voice.wav", "jingle_sound.wav", "beep.wav"}:
         raise HTTPException(status_code=404, detail=f"Unknown audio asset {asset_name!r}")
 
     file_path = _AUDIO_ASSETS_DIR / asset_name
