@@ -41,7 +41,7 @@ _FLUSH = object()  # barge-in sentinel, mirrors FLUSH from audio/output.py
 _AMBIENT_FRAME_SECONDS = 0.10
 _AMBIENT_FRAME_SAMPLES_24K = int(24000 * _AMBIENT_FRAME_SECONDS)
 _PLAYBACK_TAIL_SECONDS = 0.10
-_PRE_GREETING_DELAY_SECONDS = 8
+_PRE_GREETING_DELAY_SECONDS = 1
 
 
 def _build_ambient_mixer() -> AmbientLoopMixer | None:
@@ -109,9 +109,10 @@ async def run_twilio_bridge(
             # Safety delay so the agent does not greet immediately if Twilio intro audio is skipped.
             await asyncio.sleep(_PRE_GREETING_DELAY_SECONDS)
 
-            # Start receiver/sender tasks before sending the greeting so audio chunks from
-            # Gemini's response are never dropped while stream_sid or the queue consumer
-            # are not yet running (mirrors the on-device session ordering).
+            # Start receiver/sender tasks. We must wait for Twilio's "start" event
+            # (which sets stream_sid) before sending the greeting to Gemini.
+            # Otherwise twilio_send drops the greeting audio because stream_sid is None.
+            stream_ready = asyncio.Event()
             gemini_receive = asyncio.create_task(
                 _receive_voice_loop(
                     session, handlers, logger, gemini_audio_queue, _FLUSH,
@@ -119,15 +120,18 @@ async def run_twilio_bridge(
                 )
             )
             twilio_receive = asyncio.create_task(
-                _twilio_receive_loop(ws, session, speaking_event, stream_state, on_chunk=caller_recorder.add_chunk)
+                _twilio_receive_loop(
+                    ws, session, speaking_event, stream_state,
+                    on_chunk=caller_recorder.add_chunk,
+                    on_stream_ready=stream_ready,
+                )
             )
             twilio_send = asyncio.create_task(
                 _twilio_send_loop(ws, gemini_audio_queue, speaking_event, stream_state)
             )
 
-            # Yield once so tasks can initialize (e.g. twilio_receive sets stream_sid)
-            # before Gemini starts generating audio for the greeting.
-            await asyncio.sleep(0)
+            # Block until stream_sid is confirmed so greeting audio reaches the caller.
+            await asyncio.wait_for(stream_ready.wait(), timeout=10.0)
 
             await send_live_text(
                 session,
@@ -174,6 +178,7 @@ async def _twilio_receive_loop(
     speaking_event: asyncio.Event,
     state: _StreamState,
     on_chunk: Callable[[bytes], None] | None = None,
+    on_stream_ready: asyncio.Event | None = None,
 ) -> None:
     """Read Twilio Media Stream events; forward caller audio to Gemini."""
     async for raw in ws.iter_text():
@@ -185,6 +190,8 @@ async def _twilio_receive_loop(
             state.stream_sid = start["streamSid"]
             state.call_sid = start["callSid"]
             print(f"[twilio] call {state.call_sid} stream {state.stream_sid}", flush=True)
+            if on_stream_ready is not None:
+                on_stream_ready.set()
 
         elif event == "media":
             payload = base64.b64decode(msg["media"]["payload"])
