@@ -898,7 +898,7 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Session Conversations</h1>
+            <h1>Inca Call Log Manager</h1>
             <div class="header-nav">
                 <button class="back-btn" id="backBtn" onclick="goBackToList()">
                     ← Back to sessions
@@ -1640,9 +1640,10 @@
             document.getElementById('mainView').style.display = 'block';
             document.getElementById('detailView').classList.remove('active');
             document.getElementById('backBtn').classList.remove('visible');
-            setSessionInUrl(null);
-            // Reset page title
-            document.querySelector('h1').textContent = 'Session Conversations';
+            // Reset page title and set main URL
+            document.querySelector('h1').textContent = 'Inca Call Log Manager';
+            // Set URL to /main
+            window.history.pushState({}, '', '/main');
         }
 
         async function init() {
@@ -1668,7 +1669,12 @@
                 }
 
                 const urlSessionId = getSessionIdFromUrl();
-                if (urlSessionId) await showSessionDetail(urlSessionId);
+                if (urlSessionId) {
+                    await showSessionDetail(urlSessionId);
+                } else {
+                    // Set URL to /main when on list view
+                    window.history.replaceState({}, '', '/main');
+                }
             } catch (error) {
                 content.innerHTML = `<div class="error">Failed to load sessions: ${error.message}</div>`;
             }
