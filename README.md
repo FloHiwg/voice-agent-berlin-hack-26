@@ -97,7 +97,7 @@ AMBIENT_OFFICE_FILE=
 
 Ambient office noise is mixed under agent speech during local playback and Twilio outbound playback. If the loop file is missing or invalid, the app logs a warning and continues without ambient noise.
 Sound attribution: The Office by Iwan Gabovitch under CC-BY 3.0 License.
-Beep SoundÖ Sound Effect by <a href="https://pixabay.com/de/users/freesound_community-46691455/?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=25920">freesound_community</a> from <a href="https://pixabay.com/sound-effects//?utm_source=link-attribution&utm_medium=referral&utm_campaign=music&utm_content=25920">Pixabay</a>
+Beep Sound: Sound Effect by freesound_community from Pixabay
 
 ### Run
 
