@@ -123,6 +123,32 @@
         .back-btn.visible { display: inline-flex; }
         .back-btn:hover { border-color: var(--outline); color: var(--on-surface); }
 
+        .cta-button {
+            display: inline-flex;
+            align-items: center;
+            gap: var(--sp-2);
+            padding: 12px 24px;
+            background: var(--primary);
+            color: var(--on-primary);
+            border: none;
+            border-radius: var(--r-pill);
+            font-family: var(--font-body);
+            font-size: 14px;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: opacity 0.2s, transform 0.1s;
+            box-shadow: 0 2px 8px rgba(85, 101, 0, 0.2);
+        }
+
+        .cta-button:hover {
+            opacity: 0.9;
+        }
+
+        .cta-button:active {
+            opacity: 0.8;
+        }
+
         /* ── Filters ── */
         .filters {
             background: var(--surface-container-low);
@@ -269,8 +295,9 @@
 
         .session-header {
             display: flex;
-            flex-direction: column;
-            gap: var(--sp-2);
+            flex-direction: row;
+            justify-content: flex-end;
+            align-items: flex-start;
         }
 
         .session-info {
@@ -791,6 +818,18 @@
         /* Claim sections */
         .claim-sections { display: flex; flex-direction: column; gap: var(--sp-4); }
 
+        .claim-fields-with-cta {
+            position: relative;
+        }
+
+        .cta-overlay {
+            position: absolute;
+            top: 24px;
+            right: 0;
+            transform: translateY(-50%);
+            z-index: 1;
+        }
+
         .claim-section-title {
             font-family: var(--font-body);
             font-size: 10px;
@@ -1080,11 +1119,16 @@
 
             return `
                 <div class="claim-sections">
-                    ${filledSections.map(s => `
+                    ${filledSections.map((s, idx) => `
                         <div>
                             <div class="claim-section-title">${s.title}</div>
-                            <div class="claim-fields">
+                            <div class="claim-fields ${idx === 0 ? 'claim-fields-with-cta' : ''}">
                                 ${s.fields.map(([label, value]) => renderClaimField(label, value)).join('')}
+                                ${idx === 0 ? `
+                                    <a href="https://www.get-inca.com/" target="_blank" rel="noopener noreferrer" class="cta-button cta-overlay">
+                                        Start Case Processing
+                                    </a>
+                                ` : ''}
                             </div>
                         </div>
                     `).join('')}
@@ -1573,14 +1617,6 @@
 
             detailView.innerHTML = `
                 <div class="session-card">
-                    <div class="session-header">
-                        <div>
-                            <div class="session-id">${sid}</div>
-                            <div class="session-date">${formatDate(session.created_at)}</div>
-                            ${session.current_stage ? `<div style="margin-top: 6px; font-size: 13px; color: var(--on-surface-variant);">Stage: <strong>${session.current_stage}</strong></div>` : ''}
-                        </div>
-                    </div>
-
                     ${hasAudio ? `
                     <div class="audio-section">
                         <div class="section-label">Recording</div>
