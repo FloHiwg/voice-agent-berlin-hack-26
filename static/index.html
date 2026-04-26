@@ -348,6 +348,41 @@
             letter-spacing: 0.1em;
             text-transform: uppercase;
             color: var(--outline);
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+        }
+
+        .transcript-badge {
+            display: inline-block;
+            font-size: 11px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            margin-left: 8px;
+            font-weight: 500;
+        }
+
+        .transcript-badge.gradium {
+            background: var(--primary-container);
+            color: var(--on-primary-container);
+        }
+
+        .transcript-badge.gemini {
+            background: var(--surface-variant);
+            color: var(--on-surface-variant);
+        }
+
+        .timestamp {
+            font-size: 11px;
+            color: var(--on-surface-variant);
+            font-family: var(--font-mono);
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 4px;
+            gap: 8px;
         }
 
         .close-conversation-btn {
@@ -807,6 +842,30 @@
             }
         }
 
+        async function fetchTranscript(sessionId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/transcript`);
+                if (!response.ok) {
+                    throw new Error('Transcript not available');
+                }
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                console.error('Failed to fetch transcript:', error);
+                return null;
+            }
+        }
+
+        async function checkTranscriptStatus(sessionId) {
+            try {
+                const response = await fetch(`${API_BASE}/api/sessions/${sessionId}/transcript/status`);
+                const data = await response.json();
+                return data;
+            } catch (error) {
+                return { gradium_available: false, gemini_available: false };
+            }
+        }
+
         function formatDate(dateString) {
             if (!dateString) return 'Unknown';
             const date = new Date(dateString);
@@ -957,6 +1016,69 @@
             return div.innerHTML;
         }
 
+        function formatTimestamp(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        function renderGradiumTranscript(sessionId, container, transcript) {
+            const segments = transcript.segments || [];
+
+            if (segments.length === 0) {
+                container.innerHTML = '<div class="empty">No transcript segments</div>';
+                return;
+            }
+
+            const messagesHtml = segments.map((segment, idx) => {
+                const timestamp = formatTimestamp(segment.start_s || 0);
+
+                return `
+                    <div class="message" data-idx="${idx}">
+                        <div class="message-header">
+                            <span class="timestamp">${timestamp}</span>
+                        </div>
+                        <div class="message-wrapper">
+                            <div class="message-text">${escapeHtml(segment.text)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div class="conversation-header">
+                    <div class="conversation-title">
+                        Conversation
+                        <span class="transcript-badge gradium">Gradium AI</span>
+                    </div>
+                </div>
+                ${messagesHtml}
+            `;
+        }
+
+        function renderGeminiTranscript(sessionId, container, transcriptText) {
+            // Use existing event-based rendering for Gemini
+            loadConversationFromEvents(sessionId, container);
+        }
+
+        let transcriptPollInterval = null;
+
+        function startTranscriptPolling(sessionId, container) {
+            if (transcriptPollInterval) {
+                clearInterval(transcriptPollInterval);
+            }
+
+            transcriptPollInterval = setInterval(async () => {
+                const status = await checkTranscriptStatus(sessionId);
+                if (status.gradium_available) {
+                    clearInterval(transcriptPollInterval);
+                    transcriptPollInterval = null;
+                    // Reload conversation with Gradium transcript
+                    await loadConversation(sessionId, container);
+                }
+            }, 5000); // Poll every 5 seconds
+        }
+
         function getNoteForMessage(messageId) {
             const notes = JSON.parse(localStorage.getItem('message_notes') || '{}');
             return notes[messageId] || null;
@@ -1062,57 +1184,77 @@
             `;
         }
 
+        async function loadConversationFromEvents(sessionId, container) {
+            const events = await fetchEvents(sessionId);
+
+            const messages = events.filter(e =>
+                (e.role === 'user' || e.role === 'agent' || e.role === 'model') &&
+                (e.content || e.text) &&
+                e.role !== 'system'
+            );
+
+            // Group consecutive messages from the same actor into one bubble
+            const groups = [];
+            for (const msg of messages) {
+                const text = msg.content || msg.text || '';
+                const last = groups[groups.length - 1];
+                if (last && last.role === msg.role) {
+                    last.texts.push(text);
+                } else {
+                    groups.push({ role: msg.role, texts: [text] });
+                }
+            }
+
+            console.log('Filtered messages:', messages.length, '→', groups.length, 'groups');
+
+            const messagesHtml = groups.length === 0
+                ? '<div style="padding: 20px; text-align: center; color: var(--outline);">No messages in this session</div>'
+                : groups.map((group, idx) => renderMessage(group, idx, sessionId)).join('');
+
+            const header = container.querySelector('.conversation-header');
+            container.innerHTML = '';
+            if (header) {
+                container.appendChild(header);
+            } else {
+                container.innerHTML = `
+                    <div class="conversation-header">
+                        <div class="conversation-title">
+                            Conversation
+                            <span class="transcript-badge gemini">Gemini Live</span>
+                        </div>
+                        <button class="close-conversation-btn" onclick="closeConversation('${sessionId}')">Close ✕</button>
+                    </div>
+                `;
+            }
+            const messagesDiv = document.createElement('div');
+            messagesDiv.innerHTML = messagesHtml;
+            container.appendChild(messagesDiv);
+        }
+
         async function loadConversation(sessionId, container) {
             try {
-                const events = await fetchEvents(sessionId);
+                container.innerHTML = '<div class="loading">Loading conversation…</div>';
 
-                const messages = events.filter(e =>
-                    (e.role === 'user' || e.role === 'agent' || e.role === 'model') &&
-                    (e.content || e.text) &&
-                    e.role !== 'system'
-                );
+                // Fetch transcript (Gradium or Gemini)
+                const transcriptData = await fetchTranscript(sessionId);
 
-                // Group consecutive messages from the same actor into one bubble
-                const groups = [];
-                for (const msg of messages) {
-                    const text = msg.content || msg.text || '';
-                    const last = groups[groups.length - 1];
-                    if (last && last.role === msg.role) {
-                        last.texts.push(text);
-                    } else {
-                        groups.push({ role: msg.role, texts: [text] });
-                    }
+                if (!transcriptData) {
+                    container.innerHTML = '<div class="error">No transcript available</div>';
+                    return;
                 }
 
-                console.log('Filtered messages:', messages.length, '→', groups.length, 'groups');
-
-                const messagesHtml = groups.length === 0
-                    ? '<div style="padding: 20px; text-align: center; color: var(--outline);">No messages in this session</div>'
-                    : groups.map((group, idx) => renderMessage(group, idx, sessionId)).join('');
-
-                const header = container.querySelector('.conversation-header');
-                container.innerHTML = '';
-                if (header) {
-                    container.appendChild(header);
+                if (transcriptData.type === 'gradium' && transcriptData.format === 'json') {
+                    // Render Gradium transcript with timestamps
+                    renderGradiumTranscript(sessionId, container, transcriptData.transcript);
                 } else {
-                    container.innerHTML = `
-                        <div class="conversation-header">
-                            <div class="conversation-title">Conversation</div>
-                            <button class="close-conversation-btn" onclick="closeConversation('${sessionId}')">Close ✕</button>
-                        </div>
-                    `;
+                    // Render Gemini transcript (existing logic)
+                    await loadConversationFromEvents(sessionId, container);
+                    // Start polling for Gradium completion
+                    startTranscriptPolling(sessionId, container);
                 }
-                const messagesDiv = document.createElement('div');
-                messagesDiv.innerHTML = messagesHtml;
-                container.appendChild(messagesDiv);
             } catch (error) {
-                const header = container.querySelector('.conversation-header');
-                container.innerHTML = '';
-                if (header) container.appendChild(header);
-                const errorDiv = document.createElement('div');
-                errorDiv.className = 'error';
-                errorDiv.textContent = `Failed to load conversation: ${error.message}`;
-                container.appendChild(errorDiv);
+                container.innerHTML = '<div class="error">Error loading conversation</div>';
+                console.error('Error loading conversation:', error);
             }
         }
 

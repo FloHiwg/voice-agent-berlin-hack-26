@@ -16,6 +16,7 @@ from google.genai import errors
 from app.agent.prompts import build_system_prompt
 from app.agent.schemas import tools
 from app.agent.tools import ClaimToolHandlers, SessionFinished
+from app.agent.gradium import transcribe_session_async
 from app.claims.claim_state import ClaimState
 from app.claims.playbook_engine import PlaybookEngine
 
@@ -501,11 +502,25 @@ async def _run_voice_session(
         logger.finalize()
         agent_recorder.stop()
         caller_recorder.stop()
+
+        merged_audio_path = storage_dir / f"{claim_state.session_id}_audio.wav"
         merge_audio_recordings(
             caller_recorder.audio_path,
             agent_recorder.audio_path,
-            storage_dir / f"{claim_state.session_id}_audio.wav",
+            merged_audio_path,
         )
+
+        # Trigger Gradium transcription asynchronously (fire-and-forget)
+        gradium_api_key = os.getenv("GRADIUM_API_KEY")
+        if gradium_api_key:
+            asyncio.create_task(
+                transcribe_session_async(
+                    session_id=claim_state.session_id,
+                    audio_path=merged_audio_path,
+                    storage_dir=storage_dir,
+                )
+            )
+
     return claim_state
 
 

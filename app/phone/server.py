@@ -59,6 +59,7 @@ def _session_file_paths(storage_dir: Path, session_id: str) -> dict[str, Path]:
         "events": storage_dir / f"{session_id}.jsonl",
         "transcript": storage_dir / f"{session_id}_transcript.txt",
         "audio": storage_dir / f"{session_id}_audio.wav",
+        "gradium": storage_dir / f"gradium_{session_id}.json",
     }
 
 
@@ -200,12 +201,49 @@ async def get_session_events(session_id: str) -> dict[str, Any]:
 @app.get("/api/sessions/{session_id}/transcript")
 async def get_session_transcript(session_id: str) -> dict[str, Any]:
     storage_dir: Path = app.state.storage_dir
-    transcript_path = _session_file_paths(storage_dir, session_id)["transcript"]
-    if not transcript_path.exists():
-        raise HTTPException(status_code=404, detail=f"No transcript for session {session_id!r}")
+    file_paths = _session_file_paths(storage_dir, session_id)
+
+    # Prefer Gradium transcript if available
+    gradium_path = file_paths["gradium"]
+    if gradium_path.exists():
+        transcript_data = json.loads(gradium_path.read_text(encoding="utf-8"))
+        return {
+            "session_id": session_id,
+            "transcript": transcript_data,
+            "type": "gradium",
+            "format": "json"
+        }
+
+    # Fall back to Gemini transcript
+    gemini_path = file_paths["transcript"]
+    if gemini_path.exists():
+        return {
+            "session_id": session_id,
+            "transcript": gemini_path.read_text(encoding="utf-8"),
+            "type": "gemini",
+            "format": "text"
+        }
+
+    raise HTTPException(status_code=404, detail=f"No transcript for session {session_id!r}")
+
+
+@app.get("/api/sessions/{session_id}/transcript/status")
+async def get_transcript_status(session_id: str) -> dict[str, Any]:
+    """
+    Check transcript availability and type.
+    Used by frontend to determine if Gradium processing is complete.
+    """
+    storage_dir: Path = app.state.storage_dir
+    file_paths = _session_file_paths(storage_dir, session_id)
+
+    gradium_available = file_paths["gradium"].exists()
+    gemini_available = file_paths["transcript"].exists()
+
     return {
         "session_id": session_id,
-        "transcript": transcript_path.read_text(encoding="utf-8"),
+        "gradium_available": gradium_available,
+        "gemini_available": gemini_available,
+        "transcript_type": "gradium" if gradium_available else ("gemini" if gemini_available else None)
     }
 
 
