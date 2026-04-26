@@ -4,7 +4,6 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
-import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,8 +39,7 @@ from app.phone.audio import (
 _FLUSH = object()  # barge-in sentinel, mirrors FLUSH from audio/output.py
 _AMBIENT_FRAME_SECONDS = 0.10
 _AMBIENT_FRAME_SAMPLES_24K = int(24000 * _AMBIENT_FRAME_SECONDS)
-_PLAYBACK_TAIL_SECONDS = 0.10
-_PRE_GREETING_DELAY_SECONDS = 1
+_PRE_GREETING_DELAY_SECONDS = 8
 
 
 def _build_ambient_mixer() -> AmbientLoopMixer | None:
@@ -79,21 +77,8 @@ async def run_twilio_bridge(
     claim_state = ClaimState(session_id=new_session_id())
     claim_state.save(storage_dir)
     logger = TranscriptLogger(storage_dir, claim_state.session_id)
-    recording_started_at = time.monotonic()
-    agent_recorder = AudioRecorder(
-        storage_dir,
-        claim_state.session_id,
-        suffix="audio_agent",
-        sample_rate=24000,
-        start_time=recording_started_at,
-    )
-    caller_recorder = AudioRecorder(
-        storage_dir,
-        claim_state.session_id,
-        suffix="audio_caller",
-        sample_rate=16000,
-        start_time=recording_started_at,
-    )
+    agent_recorder = AudioRecorder(storage_dir, claim_state.session_id, suffix="audio_agent", sample_rate=24000)
+    caller_recorder = AudioRecorder(storage_dir, claim_state.session_id, suffix="audio_caller", sample_rate=16000)
     handlers = ClaimToolHandlers(claim_state, playbook_engine, storage_dir)
 
     print(f"[twilio] session {claim_state.session_id}", flush=True)
@@ -108,11 +93,12 @@ async def run_twilio_bridge(
         async with client.aio.live.connect(model=model, config=config) as session:
             # Safety delay so the agent does not greet immediately if Twilio intro audio is skipped.
             await asyncio.sleep(_PRE_GREETING_DELAY_SECONDS)
+            await send_live_text(
+                session,
+                "Begin the claims intake now. Greet the customer and ask for the first required field.",
+            )
+            logger.log("control", "greeting requested")
 
-            # Start receiver/sender tasks. We must wait for Twilio's "start" event
-            # (which sets stream_sid) before sending the greeting to Gemini.
-            # Otherwise twilio_send drops the greeting audio because stream_sid is None.
-            stream_ready = asyncio.Event()
             gemini_receive = asyncio.create_task(
                 _receive_voice_loop(
                     session, handlers, logger, gemini_audio_queue, _FLUSH,
@@ -120,28 +106,11 @@ async def run_twilio_bridge(
                 )
             )
             twilio_receive = asyncio.create_task(
-                _twilio_receive_loop(
-                    ws, session, speaking_event, stream_state,
-                    on_chunk=caller_recorder.add_chunk,
-                    on_stream_ready=stream_ready,
-                )
+                _twilio_receive_loop(ws, session, speaking_event, stream_state, on_chunk=caller_recorder.add_chunk)
             )
             twilio_send = asyncio.create_task(
                 _twilio_send_loop(ws, gemini_audio_queue, speaking_event, stream_state)
             )
-
-            # Block until stream_sid is confirmed so greeting audio reaches the caller.
-            await asyncio.wait_for(stream_ready.wait(), timeout=10.0)
-
-            await send_live_text(
-                session,
-                (
-                    "Begin the call now. Open with the EXACT scripted greeting from your "
-                    'system instructions ("Hello, this is Lisa from National Insurance '
-                    'emergency hotline. What happened?") and wait for the caller\'s response.'
-                ),
-            )
-            logger.log("control", "Lisa opening greeting requested")
 
             done, pending = await asyncio.wait(
                 {gemini_receive, twilio_receive, twilio_send},
@@ -178,7 +147,6 @@ async def _twilio_receive_loop(
     speaking_event: asyncio.Event,
     state: _StreamState,
     on_chunk: Callable[[bytes], None] | None = None,
-    on_stream_ready: asyncio.Event | None = None,
 ) -> None:
     """Read Twilio Media Stream events; forward caller audio to Gemini."""
     async for raw in ws.iter_text():
@@ -190,8 +158,6 @@ async def _twilio_receive_loop(
             state.stream_sid = start["streamSid"]
             state.call_sid = start["callSid"]
             print(f"[twilio] call {state.call_sid} stream {state.stream_sid}", flush=True)
-            if on_stream_ready is not None:
-                on_stream_ready.set()
 
         elif event == "media":
             payload = base64.b64decode(msg["media"]["payload"])
@@ -217,47 +183,21 @@ async def _twilio_send_loop(
 ) -> None:
     """Read Gemini audio from queue; resample, encode μ-law, send to Twilio."""
     ambient_mixer = _build_ambient_mixer()
-    pending_chunk: object | None = None
-
-    async def _send_pcm_24k(pcm_24k: np.ndarray) -> None:
-        pcm_8k = resample_24k_to_8k(pcm_24k)
-        payload = base64.b64encode(ulaw_encode(pcm_8k)).decode()
-        await ws.send_text(
-            json.dumps(
-                {"event": "media", "streamSid": state.stream_sid, "media": {"payload": payload}}
-            )
-        )
-
-    async def _send_ambient_frame() -> None:
-        if not state.stream_sid or ambient_mixer is None:
-            return
-        ambient_only_24k = ambient_mixer.mix(np.zeros(_AMBIENT_FRAME_SAMPLES_24K, dtype=np.int16))
-        await _send_pcm_24k(ambient_only_24k)
-
-    async def _keep_ambient_alive_during_tail() -> object | None:
-        deadline = time.monotonic() + _PLAYBACK_TAIL_SECONDS
-        while audio_queue.empty():
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                return None
-            if not state.stream_sid or ambient_mixer is None:
-                try:
-                    return await asyncio.wait_for(audio_queue.get(), timeout=remaining)
-                except asyncio.TimeoutError:
-                    return None
-            await _send_ambient_frame()
-        return await audio_queue.get()
-
     while True:
-        if pending_chunk is None:
-            try:
-                chunk = await asyncio.wait_for(audio_queue.get(), timeout=_AMBIENT_FRAME_SECONDS)
-            except asyncio.TimeoutError:
-                await _send_ambient_frame()
+        try:
+            chunk = await asyncio.wait_for(audio_queue.get(), timeout=_AMBIENT_FRAME_SECONDS)
+        except asyncio.TimeoutError:
+            if not state.stream_sid or ambient_mixer is None:
                 continue
-        else:
-            chunk = pending_chunk
-            pending_chunk = None
+            ambient_only_24k = ambient_mixer.mix(np.zeros(_AMBIENT_FRAME_SAMPLES_24K, dtype=np.int16))
+            ambient_only_8k = resample_24k_to_8k(ambient_only_24k)
+            ambient_payload = base64.b64encode(ulaw_encode(ambient_only_8k)).decode()
+            await ws.send_text(
+                json.dumps(
+                    {"event": "media", "streamSid": state.stream_sid, "media": {"payload": ambient_payload}}
+                )
+            )
+            continue
 
         if chunk is _FLUSH:
             while not audio_queue.empty():
@@ -277,11 +217,15 @@ async def _twilio_send_loop(
 
         speaking_event.set()
         pcm_24k = np.frombuffer(chunk, dtype=np.int16)
-        if ambient_mixer is not None:
-            pcm_24k = ambient_mixer.mix(pcm_24k)
-        await _send_pcm_24k(pcm_24k)
+        pcm_8k = resample_24k_to_8k(pcm_24k)
+        payload = base64.b64encode(ulaw_encode(pcm_8k)).decode()
+        await ws.send_text(
+            json.dumps(
+                {"event": "media", "streamSid": state.stream_sid, "media": {"payload": payload}}
+            )
+        )
 
         if audio_queue.empty():
-            pending_chunk = await _keep_ambient_alive_during_tail()
-            if pending_chunk is None:
+            await asyncio.sleep(0.1)
+            if audio_queue.empty():
                 speaking_event.clear()
