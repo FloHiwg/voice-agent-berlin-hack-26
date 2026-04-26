@@ -2,6 +2,12 @@
 
 A real-time insurance claims intake agent powered by Gemini 3.1 Flash Live. The agent conducts a full structured motor claim intake via voice — over a local mic/speaker or a real phone call via Twilio — following a declarative YAML playbook enforced through function calling.
 
+## Tools Used
+
+- **Gradium** — transcription processing for recorded sessions
+- **Lovable** — frontend/UI development
+- **Google DeepMind (Gemini Live)** — real-time voice conversation engine
+
 Three run modes:
 - **Text** — terminal only, no audio hardware required
 - **Voice** — local microphone and speaker via Gemini Live audio
