@@ -229,6 +229,14 @@
             white-space: nowrap;
         }
 
+        .session-time-cell {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--on-surface-variant);
+            white-space: nowrap;
+            font-family: var(--font-mono);
+        }
+
         .session-policy-cell {
             font-size: 13px;
             font-weight: 400;
@@ -236,6 +244,12 @@
         }
 
         .session-customer-cell {
+            font-size: 13px;
+            font-weight: 400;
+            color: var(--on-surface-variant);
+        }
+
+        .session-location-cell {
             font-size: 13px;
             font-weight: 400;
             color: var(--on-surface-variant);
@@ -877,7 +891,7 @@
                     type="text"
                     class="filter-input"
                     id="filterInput"
-                    placeholder="Search by session ID, stage, or date..."
+                    placeholder="Search by date, time, policy, customer, or location..."
                 />
                 <span class="filter-stats" id="filterStats"></span>
             </div>
@@ -1242,16 +1256,28 @@
         function renderSession(session) {
             const state = session.state || {};
             const customer = state.customer || {};
+            const incident = state.incident || {};
+
+            // Extract date and time separately
+            const dateObj = session.created_at ? new Date(session.created_at) : null;
+            const dateStr = dateObj ? dateObj.toLocaleDateString() : 'N/A';
+            const timeStr = dateObj ? dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A';
 
             const policyNumber = customer.policy_number || 'N/A';
-            const customerName = customer.full_name || 'Unknown';
-            const createdDate = formatDate(session.created_at);
+
+            // Try to get customer name from state, fallback to extracting from transcript
+            let customerName = customer.full_name || customer.caller_name || 'Unknown';
+
+            // Get location from incident
+            const location = incident.location || 'N/A';
 
             return `
                 <tr class="session-row" data-session-id="${session.session_id}">
-                    <td class="session-date-cell">${createdDate}</td>
+                    <td class="session-date-cell">${dateStr}</td>
+                    <td class="session-time-cell">${timeStr}</td>
                     <td class="session-policy-cell">${escapeHtml(policyNumber)}</td>
                     <td class="session-customer-cell">${escapeHtml(customerName)}</td>
+                    <td class="session-location-cell">${escapeHtml(location)}</td>
                 </tr>
             `;
         }
@@ -1338,11 +1364,25 @@
                 filteredSessions = allSessions;
             } else {
                 const lowerQuery = query.toLowerCase();
-                filteredSessions = allSessions.filter(session =>
-                    session.session_id.toLowerCase().includes(lowerQuery) ||
-                    (session.current_stage && session.current_stage.toLowerCase().includes(lowerQuery)) ||
-                    (session.created_at && session.created_at.toLowerCase().includes(lowerQuery))
-                );
+                filteredSessions = allSessions.filter(session => {
+                    const state = session.state || {};
+                    const customer = state.customer || {};
+                    const incident = state.incident || {};
+
+                    // Extract searchable fields
+                    const dateStr = session.created_at ? new Date(session.created_at).toLocaleDateString().toLowerCase() : '';
+                    const timeStr = session.created_at ? new Date(session.created_at).toLocaleTimeString().toLowerCase() : '';
+                    const policyNumber = (customer.policy_number || '').toLowerCase();
+                    const customerName = (customer.full_name || customer.caller_name || '').toLowerCase();
+                    const location = (incident.location || '').toLowerCase();
+
+                    // Search only in displayed columns
+                    return dateStr.includes(lowerQuery) ||
+                           timeStr.includes(lowerQuery) ||
+                           policyNumber.includes(lowerQuery) ||
+                           customerName.includes(lowerQuery) ||
+                           location.includes(lowerQuery);
+                });
             }
             updateFilterStats();
             renderSessionsList();
@@ -1364,9 +1404,11 @@
                     <table class="sessions-table">
                         <thead>
                             <tr>
-                                <th>Date & Time</th>
+                                <th>Date</th>
+                                <th>Time</th>
                                 <th>Policy Number</th>
                                 <th>Customer Name</th>
+                                <th>Location</th>
                             </tr>
                         </thead>
                         <tbody>
