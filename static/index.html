@@ -1676,10 +1676,10 @@
             document.getElementById('mainView').style.display = 'block';
             document.getElementById('detailView').classList.remove('active');
             document.getElementById('backBtn').classList.remove('visible');
-            // Reset page title and set main URL
+            // Reset page title and set root URL
             document.querySelector('h1').textContent = 'Inca Call Log Manager';
-            // Set URL to /main
-            window.history.pushState({}, '', '/main');
+            // Set URL to /
+            window.history.pushState({}, '', '/');
         }
 
         async function init() {
@@ -1708,8 +1708,8 @@
                 if (urlSessionId) {
                     await showSessionDetail(urlSessionId);
                 } else {
-                    // Set URL to /main when on list view
-                    window.history.replaceState({}, '', '/main');
+                    // Set URL to / when on list view
+                    window.history.replaceState({}, '', '/');
                 }
             } catch (error) {
                 content.innerHTML = `<div class="error">Failed to load sessions: ${error.message}</div>`;

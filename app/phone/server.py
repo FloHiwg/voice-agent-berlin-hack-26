@@ -13,7 +13,7 @@ from urllib.parse import quote
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from google import genai
 from google.genai import types
@@ -165,6 +165,15 @@ async def root() -> FileResponse:
     if not index_path.exists():
         raise HTTPException(status_code=404, detail="Web UI not found")
     return FileResponse(index_path)
+
+
+@app.get("/main")
+@app.get("/main/")
+async def legacy_main_redirect(request: Request) -> RedirectResponse:
+    """Backwards-compatible redirect for stale frontend links."""
+    query = request.url.query
+    target = f"/?{query}" if query else "/"
+    return RedirectResponse(url=target, status_code=307)
 
 
 @app.get("/api/sessions")
