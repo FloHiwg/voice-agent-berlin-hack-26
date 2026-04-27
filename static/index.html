@@ -182,18 +182,27 @@
         .extracted-field-label { font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--on-surface-variant); margin-bottom: 3px; }
         .extracted-field-value { font-size: 14px; font-weight: 600; color: var(--on-surface); }
 
-        /* Stage progress */
-        .stages-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--outline-variant); }
-        .stages-label { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--on-surface-variant); margin-bottom: 8px; }
-        .stage-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-        .stage-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-        .stage-dot-completed { background: var(--primary); }
-        .stage-dot-current   { background: var(--primary-fixed-dim); }
-        .stage-dot-pending   { background: var(--outline-variant); }
-        .stage-name { font-size: 12px; text-transform: capitalize; }
-        .stage-completed { color: var(--on-surface); }
-        .stage-current   { color: var(--primary); font-weight: 600; }
-        .stage-pending   { color: var(--outline); }
+        /* Tabs */
+        .tab-bar { display: flex; gap: 4px; margin-bottom: 16px; }
+        .tab-btn {
+            padding: 6px 16px; border-radius: var(--r-pill); border: 1px solid transparent;
+            font-family: var(--font-body); font-size: 12px; font-weight: 600;
+            letter-spacing: 0.05em; text-transform: uppercase; cursor: pointer; transition: all 0.15s;
+            background: transparent; color: var(--on-surface-variant);
+        }
+        .tab-btn:hover { border-color: var(--outline-variant); }
+        .tab-btn.active { background: var(--primary-container); color: var(--on-primary-container); border-color: transparent; }
+        .tab-pane { display: none; }
+        .tab-pane.active { display: block; }
+
+        /* JSON pane */
+        .json-panel { background: rgba(27,28,26,0.88); border-radius: var(--r-lg); padding: 16px; max-height: 560px; overflow: auto; }
+        .json-panel pre { font-family: var(--font-mono); font-size: 12px; line-height: 1.65; white-space: pre-wrap; word-break: break-all; color: #c8d9c0; }
+        .cj-key  { color: #b6d332; }
+        .cj-str  { color: #c8d9c0; }
+        .cj-num  { color: #6ee7b7; }
+        .cj-bool { color: #d2f04e; }
+        .cj-null { color: #767963; }
 
         /* States */
         .loading-state { text-align: center; padding: 48px 32px; color: var(--on-surface-variant); font-size: 14px; }
@@ -397,6 +406,26 @@
             return groups;
         }
 
+        function colorizeJson(obj) {
+            return JSON.stringify(obj, null, 2).replace(
+                /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+\.?\d*)/g,
+                m => {
+                    if (/^"/.test(m)) return m.endsWith(':') ? `<span class="cj-key">${m}</span>` : `<span class="cj-str">${m}</span>`;
+                    if (/true|false/.test(m)) return `<span class="cj-bool">${m}</span>`;
+                    if (/null/.test(m))       return `<span class="cj-null">${m}</span>`;
+                    return `<span class="cj-num">${m}</span>`;
+                }
+            );
+        }
+
+        function switchTab(btn, paneId) {
+            const panel = btn.closest('.detail-panel');
+            panel.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            panel.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+            btn.classList.add('active');
+            panel.querySelector('#' + paneId).classList.add('active');
+        }
+
         async function showDetail(sessionId) {
             document.getElementById('mainView').classList.add('hidden');
             const dv = document.getElementById('detailView');
@@ -417,16 +446,6 @@
             const incidentLine = incidentParts.length
                 ? `<div class="meta-incident"><strong>Incident:</strong> ${esc(incidentParts.join(' · '))}${incident.description ? ' — ' + esc(incident.description) : ''}</div>`
                 : '';
-
-            const stagesHtml = s.stages?.length ? `
-                <div class="stages-section">
-                    <div class="stages-label">Intake Progress</div>
-                    ${s.stages.map(st => `
-                        <div class="stage-item">
-                            <div class="stage-dot stage-dot-${st.status === 'completed' ? 'completed' : st.status === 'current' ? 'current' : 'pending'}"></div>
-                            <span class="stage-name stage-${st.status === 'completed' ? 'completed' : st.status === 'current' ? 'current' : 'pending'}">${esc(st.name.replace(/_/g,' '))}</span>
-                        </div>`).join('')}
-                </div>` : '';
 
             const extractedHtml = Object.keys(extracted).length
                 ? Object.entries(extracted).map(([cat, items]) => `
@@ -470,9 +489,17 @@
                         </div>
                     </div>
                     <div class="glass glass-hero detail-panel">
-                        <h2>Extracted Data</h2>
-                        <div class="extracted-scroll">${extractedHtml}</div>
-                        ${stagesHtml}
+                        <h2>Claim Data</h2>
+                        <div class="tab-bar">
+                            <button class="tab-btn active" onclick="switchTab(this,'tab-fields')">Fields</button>
+                            <button class="tab-btn" onclick="switchTab(this,'tab-json')">JSON</button>
+                        </div>
+                        <div id="tab-fields" class="tab-pane active">
+                            <div class="extracted-scroll">${extractedHtml}</div>
+                        </div>
+                        <div id="tab-json" class="tab-pane">
+                            <div class="json-panel"><pre>${colorizeJson(s.state)}</pre></div>
+                        </div>
                     </div>
                 </div>`;
 
