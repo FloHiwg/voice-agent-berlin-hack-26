@@ -145,14 +145,9 @@ def _build_session_summary(storage_dir: Path, playbook_path: Path, session_id: s
 
 
 def _validate_env() -> None:
-    required = [
-        "GEMINI_API_KEY",
-        "TWILIO_ACCOUNT_SID",
-        "TWILIO_API_KEY_SID",
-        "TWILIO_API_KEY_SECRET",
-        "TWILIO_NUMBER",
-        "TWILIO_PUBLIC_URL",
-    ]
+    # Only GEMINI_API_KEY is required for local demos
+    # Twilio vars are optional (only needed for phone mode)
+    required = ["GEMINI_API_KEY"]
     missing = [k for k in required if not os.getenv(k)]
     if missing:
         raise RuntimeError(f"Missing env vars: {', '.join(missing)}")
